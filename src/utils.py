@@ -1,5 +1,6 @@
 import yaml
 import os
+import sys
 
 class ConfigManager:
     _instance = None
@@ -93,6 +94,32 @@ class ConfigManager:
         for category, settings in self.schema.items():
             config[category] = extract_value(settings)
         return config
+
+    @classmethod
+    def ensure_windows_startup(cls, enable: bool):
+        """Create or remove Windows Run registry entry to start app at login."""
+        try:
+            import winreg  # type: ignore
+        except Exception:
+            return False
+
+        app_name = 'WhisperWriter'
+        run_key_path = r"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key_path, 0, winreg.KEY_ALL_ACCESS) as key:
+                if enable:
+                    exe_path = os.path.abspath(os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')) if sys.executable.endswith('python.exe') else sys.executable
+                    script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'run.py'))
+                    command = f'"{exe_path}" "{script_path}"'
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, command)
+                else:
+                    try:
+                        winreg.DeleteValue(key, app_name)
+                    except FileNotFoundError:
+                        pass
+            return True
+        except Exception:
+            return False
 
     def load_user_config(self, config_path=os.path.join('src', 'config.yaml')):
         """Load user configuration and merge with default config."""

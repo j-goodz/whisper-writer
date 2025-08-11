@@ -45,9 +45,10 @@ class MainWindow(BaseWindow):
 
     def closeEvent(self, event):
         """
-        Close the application when the main window is closed.
+        Hide instead of closing the application when the main window is closed.
         """
-        self.closeApp.emit()
+        event.ignore()
+        self.hide()
 
     def startPressed(self):
         """

@@ -22,13 +22,24 @@ class SettingsWindow(BaseWindow):
         super().__init__('Settings', 700, 700)
         self.schema = ConfigManager.get_schema()
         self.init_settings_ui()
+        self._original_values = self._snapshot_current_values()
+        self._apply_styling()
 
     def init_settings_ui(self):
         """Initialize the settings user interface."""
+        # Header
+        header = QLabel('Settings')
+        header.setObjectName('SettingsHeader')
+        header.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.main_layout.addWidget(header)
+
+        # Tabs (each made scrollable)
         self.tabs = QTabWidget()
         self.main_layout.addWidget(self.tabs)
 
         self.create_tabs()
+
+        # Footer actions
         self.create_buttons()
 
         # Connect the use_api checkbox state change
@@ -38,39 +49,66 @@ class SettingsWindow(BaseWindow):
             self.toggle_api_local_options(self.use_api_checkbox.isChecked())
 
     def create_tabs(self):
-        """Create tabs for each category in the schema."""
+        """Create tabs for each category in the schema (scrollable)."""
+        from PyQt5.QtWidgets import QScrollArea
         for category, settings in self.schema.items():
-            tab = QWidget()
-            tab_layout = QVBoxLayout()
-            tab.setLayout(tab_layout)
-            self.tabs.addTab(tab, category.replace('_', ' ').capitalize())
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(12, 12, 12, 12)
+            container_layout.setSpacing(12)
 
-            self.create_settings_widgets(tab_layout, category, settings)
-            tab_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+            # Build content
+            self.create_settings_widgets(container_layout, category, settings)
+            container_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+            # Wrap in scroll area
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(container)
+            self.tabs.addTab(scroll, category.replace('_', ' ').capitalize())
 
     def create_settings_widgets(self, layout, category, settings):
-        """Create widgets for each setting in a category."""
+        """Create widgets for each setting in a category, grouped per sub-category."""
+        from PyQt5.QtWidgets import QGroupBox, QVBoxLayout
         for sub_category, sub_settings in settings.items():
+            # Flat (no subcategory) single value
             if isinstance(sub_settings, dict) and 'value' in sub_settings:
                 self.add_setting_widget(layout, sub_category, sub_settings, category)
-            else:
-                for key, meta in sub_settings.items():
-                    self.add_setting_widget(layout, key, meta, category, sub_category)
+                continue
+
+            # Grouped subcategory
+            group_title = sub_category.replace('_', ' ').capitalize()
+            group = QGroupBox(group_title)
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(12, 12, 12, 12)
+            group_layout.setSpacing(8)
+
+            for key, meta in sub_settings.items():
+                self.add_setting_widget(group_layout, key, meta, category, sub_category)
+
+            layout.addWidget(group)
 
     def create_buttons(self):
-        """Create reset and save buttons."""
+        """Create reset and save buttons in a bottom action bar."""
+        actions = QHBoxLayout()
+        actions.addStretch(1)
         reset_button = QPushButton('Reset to saved settings')
+        reset_button.setObjectName('ResetButton')
         reset_button.clicked.connect(self.reset_settings)
-        self.main_layout.addWidget(reset_button)
+        actions.addWidget(reset_button)
 
         save_button = QPushButton('Save')
+        save_button.setObjectName('SaveButton')
         save_button.clicked.connect(self.save_settings)
-        self.main_layout.addWidget(save_button)
+        actions.addWidget(save_button)
+        self.main_layout.addLayout(actions)
 
     def add_setting_widget(self, layout, key, meta, category, sub_category=None):
         """Add a setting widget to the layout."""
-        item_layout = QHBoxLayout()
-        label = QLabel(f"{key.replace('_', ' ').capitalize()}:")
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        label = QLabel(f"{key.replace('_', ' ').capitalize()}")
+        label.setObjectName('FieldLabel')
         label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         widget = self.create_widget_for_type(key, meta, category, sub_category)
@@ -78,14 +116,15 @@ class SettingsWindow(BaseWindow):
             return
 
         help_button = self.create_help_button(meta.get('description', ''))
+        help_button.setObjectName('HelpButton')
 
-        item_layout.addWidget(label)
+        row.addWidget(label, 2)
         if isinstance(widget, QWidget):
-            item_layout.addWidget(widget)
+            row.addWidget(widget, 5)
         else:
-            item_layout.addLayout(widget)
-        item_layout.addWidget(help_button)
-        layout.addLayout(item_layout)
+            row.addLayout(widget, 5)
+        row.addWidget(help_button, 0)
+        layout.addLayout(row)
 
         # Set object names for the widget, label, and help button
         widget_name = f"{category}_{sub_category}_{key}_input" if sub_category else f"{category}_{key}_input"
@@ -115,7 +154,7 @@ class SettingsWindow(BaseWindow):
         elif meta_type == 'str':
             return self.create_line_edit(current_value, key)
         elif meta_type in ['int', 'float']:
-            return self.create_line_edit(str(current_value))
+            return self.create_numeric_input(current_value, meta_type)
         return None
 
     def create_checkbox(self, value, key):
@@ -148,13 +187,28 @@ class SettingsWindow(BaseWindow):
             return container
         return widget
 
+    def create_numeric_input(self, value, value_type):
+        from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox
+        if value_type == 'int':
+            spin = QSpinBox()
+            spin.setRange(-10_000_000, 10_000_000)
+            spin.setValue(int(value))
+            return spin
+        else:
+            dspin = QDoubleSpinBox()
+            dspin.setDecimals(6)
+            dspin.setSingleStep(0.001)
+            dspin.setRange(-1000.0, 1000.0)
+            dspin.setValue(float(value))
+            return dspin
+
     def create_help_button(self, description):
         help_button = QToolButton()
         help_button.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxQuestion))
         help_button.setAutoRaise(True)
         help_button.setToolTip(description)
         help_button.setCursor(Qt.PointingHandCursor)
-        help_button.setFocusPolicy(Qt.TabFocus)
+        help_button.setFocusPolicy(Qt.NoFocus)
         help_button.clicked.connect(lambda: self.show_description(description))
         return help_button
 
@@ -175,6 +229,8 @@ class SettingsWindow(BaseWindow):
     def save_settings(self):
         """Save the settings to the config file and .env file."""
         self.iterate_settings(self.save_setting)
+        # Update original snapshot after saving
+        self._original_values = self._snapshot_current_values()
 
         # Save the API key to the .env file
         api_key = ConfigManager.get_config_value('model_options', 'api', 'api_key') or ''
@@ -185,6 +241,9 @@ class SettingsWindow(BaseWindow):
         ConfigManager.set_config_value(None, 'model_options', 'api', 'api_key')
 
         ConfigManager.save_config()
+        # Handle Windows startup toggle
+        start_on_login = ConfigManager.get_config_value('misc', 'start_on_login') is True
+        ConfigManager.ensure_windows_startup(start_on_login)
         QMessageBox.information(self, 'Settings Saved', 'Settings have been saved. The application will now restart.')
         self.settings_saved.emit()
         self.close()
@@ -216,12 +275,17 @@ class SettingsWindow(BaseWindow):
 
     def set_widget_value(self, widget, value, value_type):
         """Set the value of the widget."""
+        from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox
         if isinstance(widget, QCheckBox):
             widget.setChecked(value)
         elif isinstance(widget, QComboBox):
             widget.setCurrentText(value)
         elif isinstance(widget, QLineEdit):
             widget.setText(str(value) if value is not None else '')
+        elif isinstance(widget, QSpinBox):
+            widget.setValue(int(value) if value is not None else 0)
+        elif isinstance(widget, QDoubleSpinBox):
+            widget.setValue(float(value) if value is not None else 0.0)
         elif isinstance(widget, QWidget) and widget.layout():
             # This is for the model_path widget
             line_edit = widget.layout().itemAt(0).widget()
@@ -230,6 +294,7 @@ class SettingsWindow(BaseWindow):
 
     def get_widget_value_typed(self, widget, value_type):
         """Get the value of the widget with proper typing."""
+        from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox
         if isinstance(widget, QCheckBox):
             return widget.isChecked()
         elif isinstance(widget, QComboBox):
@@ -242,6 +307,10 @@ class SettingsWindow(BaseWindow):
                 return float(text) if text else None
             else:
                 return text or None
+        elif isinstance(widget, QSpinBox):
+            return int(widget.value())
+        elif isinstance(widget, QDoubleSpinBox):
+            return float(widget.value())
         elif isinstance(widget, QWidget) and widget.layout():
             # This is for the model_path widget
             line_edit = widget.layout().itemAt(0).widget()
@@ -282,19 +351,82 @@ class SettingsWindow(BaseWindow):
                             func(widget, category, sub_category, key, meta)
 
     def closeEvent(self, event):
-        """Confirm before closing the settings window without saving."""
-        reply = QMessageBox.question(
-            self,
-            'Close without saving?',
-            'Are you sure you want to close without saving?',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        """Prompt only if there are unsaved changes; otherwise just close the window."""
+        if self._has_unsaved_changes():
+            reply = QMessageBox.question(
+                self,
+                'Close without saving?',
+                'Close settings without saving changes?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+        # Revert UI to last saved config on close
+        ConfigManager.reload_config()
+        self.update_widgets_from_config()
+        self.settings_closed.emit()
+        event.accept()
 
-        if reply == QMessageBox.Yes:
-            ConfigManager.reload_config()  # Revert to last saved configuration
-            self.update_widgets_from_config()
-            self.settings_closed.emit()
-            super().closeEvent(event)
-        else:
-            event.ignore()
+    def _snapshot_current_values(self):
+        values = {}
+        def capture(widget, category, sub_category, key, meta):
+            values[(category, sub_category, key)] = self.get_widget_value_typed(widget, meta.get('type'))
+        self.iterate_settings(capture)
+        return values
+
+    def _has_unsaved_changes(self):
+        current = self._snapshot_current_values()
+        return any(current.get(k) != v for k, v in self._original_values.items())
+
+    def _apply_styling(self):
+        """Apply a more refined visual style to the Settings window."""
+        self.setStyleSheet("""
+            #SettingsHeader {
+                font-size: 20px;
+                font-weight: 600;
+                padding: 4px 6px 12px 6px;
+                color: #303030;
+            }
+            QTabWidget::pane {
+                border: 1px solid #d0d0d0;
+                border-radius: 6px;
+                margin-top: -1px;
+            }
+            QTabBar::tab {
+                padding: 6px 12px;
+            }
+            QGroupBox {
+                border: 1px solid #dcdcdc;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 16px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 4px;
+                color: #404040;
+                font-weight: 600;
+            }
+            QLabel#FieldLabel {
+                color: #404040;
+            }
+            QPushButton#SaveButton {
+                background-color: #2d7dff;
+                color: white;
+                border: none;
+                padding: 6px 14px;
+                border-radius: 6px;
+            }
+            QPushButton#SaveButton:hover {
+                background-color: #1f67db;
+            }
+            QPushButton#ResetButton {
+                padding: 6px 12px;
+            }
+            QToolButton#HelpButton {
+                padding: 0 4px;
+            }
+        """)

@@ -83,7 +83,6 @@ class StatusWindow(BaseWindow):
         elif status == 'transcribing':
             self.icon_label.setPixmap(self.pencil_pixmap)
             self.status_label.setText('Transcribing...')
-
         if status in ('idle', 'error', 'cancel'):
             self.close()
 

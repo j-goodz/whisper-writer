@@ -123,13 +123,33 @@ recording_options:
     value: 100
     type: int
     description: "The minimum duration in milliseconds for a recording to be processed. Recordings shorter than this will be discarded."
+  auto_start_listening:
+    value: true
+    type: bool
+    description: "Start listening for the hotkey immediately at app launch."
+  auto_start_recording:
+    value: false
+    type: bool
+    description: "Begin recording immediately at app launch (use with caution)."
 
 # Post-processing options for the transcribed text
 post_processing:
+  writing_mode:
+    value: auto
+    type: str
+    description: "How to insert text: auto chooses based on delay/length, type sends keystrokes, paste uses clipboard."
+    options:
+      - auto
+      - type
+      - paste
   writing_key_press_delay:
     value: 0.005
     type: float
     description: "The delay in seconds between each key press when writing the transcribed text."
+  bulk_paste_threshold:
+    value: 80
+    type: int
+    description: "If delay is 0 and text length exceeds this threshold, use fast clipboard paste instead of per-key typing."
   remove_trailing_period:
     value: false
     type: bool
@@ -165,3 +185,15 @@ misc:
     value: false
     type: bool
     description: "Set to true to play a noise after the transcription has been typed out."
+  warm_up_model_on_launch:
+    value: true
+    type: bool
+    description: "If using a local model, load it in the background on launch to reduce the first transcription delay."
+  start_hidden:
+    value: true
+    type: bool
+    description: "Start minimized to tray."
+  start_on_login:
+    value: true
+    type: bool
+    description: "Launch WhisperWriter when you sign in to Windows."

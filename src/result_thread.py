@@ -94,6 +94,7 @@ class ResultThread(QThread):
             if not self.is_running:
                 return
 
+            # Return to idle and emit the result
             self.statusSignal.emit('idle')
             self.resultSignal.emit(result)
 

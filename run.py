@@ -1,8 +1,13 @@
 import os
 import sys
-import subprocess
 from dotenv import load_dotenv
 
 print('Starting WhisperWriter...')
 load_dotenv()
-subprocess.run([sys.executable, os.path.join('src', 'main.py')])
+# Run directly to avoid an extra Python process spawn and speed startup
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+import main  # type: ignore
+
+if __name__ == '__main__':
+    app = main.WhisperWriterApp()
+    app.run()

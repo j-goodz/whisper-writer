@@ -2,8 +2,6 @@ import io
 import os
 import numpy as np
 import soundfile as sf
-from faster_whisper import WhisperModel
-from openai import OpenAI
 
 from utils import ConfigManager
 
@@ -23,6 +21,8 @@ def create_local_model():
         device = local_model_options['device']
 
     try:
+        # Lazy import to reduce startup time
+        from faster_whisper import WhisperModel
         if model_path:
             ConfigManager.console_print(f'Loading model from: {model_path}')
             model = WhisperModel(model_path,
@@ -36,6 +36,7 @@ def create_local_model():
     except Exception as e:
         ConfigManager.console_print(f'Error initializing WhisperModel: {e}')
         ConfigManager.console_print('Falling back to CPU.')
+        from faster_whisper import WhisperModel
         model = WhisperModel(model_path or local_model_options['model'],
                              device='cpu',
                              compute_type=compute_type,
@@ -68,6 +69,8 @@ def transcribe_api(audio_data):
     Transcribe an audio file using the OpenAI API.
     """
     model_options = ConfigManager.get_config_section('model_options')
+    # Lazy import to reduce startup time
+    from openai import OpenAI
     client = OpenAI(
         api_key=os.getenv('OPENAI_API_KEY') or None,
         base_url=model_options['api']['base_url'] or 'https://api.openai.com/v1'

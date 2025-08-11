@@ -2,7 +2,7 @@ import subprocess
 import os
 import signal
 import time
-from pynput.keyboard import Controller as PynputController
+from pynput.keyboard import Controller as PynputController, Key
 
 from utils import ConfigManager
 
@@ -36,6 +36,39 @@ class InputSimulator:
         elif self.input_method == 'dotool':
             self._initialize_dotool()
 
+    def should_use_paste(self, text: str) -> bool:
+        """Decide whether to paste instead of typing based on settings and text length."""
+        interval = ConfigManager.get_config_value('post_processing', 'writing_key_press_delay') or 0.0
+        mode = (ConfigManager.get_config_value('post_processing', 'writing_mode') or 'auto').lower()
+        paste_bulk = ConfigManager.get_config_value('post_processing', 'bulk_paste_threshold') or 80
+        if mode == 'paste':
+            return True
+        if mode == 'type':
+            return False
+        return (interval <= 0.0) and (len(text) >= int(paste_bulk))
+
+    def can_paste_here(self) -> bool:
+        """Best-effort check that there is a reasonable foreground target window to receive input."""
+        try:
+            if os.name == 'nt':
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetForegroundWindow()
+                if not hwnd:
+                    return False
+                pid = ctypes.c_ulong()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                # Avoid pasting into our own process window (heuristic)
+                if pid.value == os.getpid():
+                    return False
+                is_enabled = user32.IsWindowEnabled(hwnd)
+                is_visible = user32.IsWindowVisible(hwnd)
+                return bool(is_enabled and is_visible)
+            # Other OS: assume ok
+            return True
+        except Exception:
+            return True
+
     def _initialize_dotool(self):
         """
         Initialize the dotool process for input simulation.
@@ -59,8 +92,18 @@ class InputSimulator:
             text (str): The text to type.
         """
         interval = ConfigManager.get_config_value('post_processing', 'writing_key_press_delay')
+        mode = (ConfigManager.get_config_value('post_processing', 'writing_mode') or 'auto').lower()
         if self.input_method == 'pynput':
-            self._typewrite_pynput(text, interval)
+            paste_bulk = ConfigManager.get_config_value('post_processing', 'bulk_paste_threshold') or 80
+            if mode == 'paste':
+                self._paste_pynput(text)
+            elif mode == 'type':
+                self._typewrite_pynput(text, max(0.0, interval or 0.0))
+            else:
+                if (interval or 0.0) <= 0 and len(text) >= paste_bulk:
+                    self._paste_pynput(text)
+                else:
+                    self._typewrite_pynput(text, max(0.0, interval or 0.0))
         elif self.input_method == 'ydotool':
             self._typewrite_ydotool(text, interval)
         elif self.input_method == 'dotool':
@@ -78,6 +121,28 @@ class InputSimulator:
             self.keyboard.press(char)
             self.keyboard.release(char)
             time.sleep(interval)
+
+    def _paste_pynput(self, text):
+        try:
+            import pyperclip
+        except Exception:
+            # Fallback to typing if clipboard lib not available
+            return self._typewrite_pynput(text, 0.0)
+        # Save current clipboard, set text, paste, restore
+        try:
+            previous = pyperclip.paste()
+        except Exception:
+            previous = None
+        pyperclip.copy(text)
+        with self.keyboard.pressed(Key.ctrl):
+            self.keyboard.press('v')
+            self.keyboard.release('v')
+        time.sleep(0.01)
+        if previous is not None:
+            try:
+                pyperclip.copy(previous)
+            except Exception:
+                pass
 
     def _typewrite_ydotool(self, text, interval):
         """
