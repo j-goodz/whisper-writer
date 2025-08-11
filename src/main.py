@@ -143,6 +143,10 @@ class WhisperWriterApp(QObject):
         # Separator before exit
         tray_menu.addSeparator()
 
+        restart_action = QAction('Restart', self.app)
+        restart_action.triggered.connect(self.restart_app)
+        tray_menu.addAction(restart_action)
+
         exit_action = QAction('Exit', self.app)
         exit_action.triggered.connect(self.exit_app)
         tray_menu.addAction(exit_action)

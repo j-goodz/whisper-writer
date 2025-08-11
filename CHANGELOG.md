@@ -6,18 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 ### Added
-- New settings window to configure WhisperWriter.
-- New main window to either start the keyboard listener or open the settings window.
-- New continuous recording mode ([Issue #40](https://github.com/savbell/whisper-writer/issues/40)).
-- New option to play a sound when transcription finishes ([Issue #40](https://github.com/savbell/whisper-writer/issues/40)).
+- Auto-start listening at launch (`recording_options.auto_start_listening`).
+- Start hidden to tray (`misc.start_hidden`).
+- Start on Windows login (`misc.start_on_login`) with registry integration.
+- Optional local model warm-up on launch (`misc.warm_up_model_on_launch`).
+- Tray quick actions (Start Listening, Start Recording Now, Stop) and single-click to open Settings.
+- Activation key “Set” dialog that captures key combos (no manual typing needed).
+- Paste-only/auto typing modes (`post_processing.writing_mode`) and bulk paste threshold.
+- Numeric inputs (SpinBoxes) for int/float settings for easier editing.
 
 ### Changed
-- Migrated status window from using `tkinter` to `PyQt5`.
-- Migrated from using JSON to using YAML to store configuration settings.
-- Upgraded to latest versions of `openai` and `faster-whisper`, including support for local API ([Issue #32](https://github.com/savbell/whisper-writer/issues/32)).
+- Faster startup via lazy imports and deferring local model creation until first use.
+- `run.py` now runs the app directly (no extra Python subprocess).
+- Settings UI restyled: grouped sections, scrollable tabs, modern visuals.
+- Closing main window now hides the app instead of exiting; app remains in the tray.
+- Tray menu grouped with separators; removed “Show Main Menu”.
+- Defaults updated: `misc.warm_up_model_on_launch` = true, `misc.start_on_login` = true.
 
 ### Removed
-- No longer using `keyboard` package to listen for key presses.
+- Deprecated tray item “Show Main Menu”.
 
 ## [1.0.1] - 2024-01-28
 ### Added

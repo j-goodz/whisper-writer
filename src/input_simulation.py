@@ -37,15 +37,18 @@ class InputSimulator:
             self._initialize_dotool()
 
     def should_use_paste(self, text: str) -> bool:
-        """Decide whether to paste instead of typing based on settings and text length."""
+        """Decide whether to paste instead of typing based on settings, text length, and estimated typing time."""
         interval = ConfigManager.get_config_value('post_processing', 'writing_key_press_delay') or 0.0
         mode = (ConfigManager.get_config_value('post_processing', 'writing_mode') or 'auto').lower()
         paste_bulk = ConfigManager.get_config_value('post_processing', 'bulk_paste_threshold') or 80
+        max_typing_ms = ConfigManager.get_config_value('post_processing', 'paste_when_typing_time_exceeds_ms') or 1000
         if mode == 'paste':
             return True
         if mode == 'type':
             return False
-        return (interval <= 0.0) and (len(text) >= int(paste_bulk))
+        # Auto mode: paste if text is long OR estimated typing time exceeds threshold
+        estimated_ms = (interval * len(text)) * 1000.0
+        return (len(text) >= int(paste_bulk)) or (estimated_ms >= float(max_typing_ms))
 
     def can_paste_here(self) -> bool:
         """Best-effort check that there is a reasonable foreground target window to receive input."""
@@ -94,16 +97,10 @@ class InputSimulator:
         interval = ConfigManager.get_config_value('post_processing', 'writing_key_press_delay')
         mode = (ConfigManager.get_config_value('post_processing', 'writing_mode') or 'auto').lower()
         if self.input_method == 'pynput':
-            paste_bulk = ConfigManager.get_config_value('post_processing', 'bulk_paste_threshold') or 80
-            if mode == 'paste':
+            if self.should_use_paste(text):
                 self._paste_pynput(text)
-            elif mode == 'type':
-                self._typewrite_pynput(text, max(0.0, interval or 0.0))
             else:
-                if (interval or 0.0) <= 0 and len(text) >= paste_bulk:
-                    self._paste_pynput(text)
-                else:
-                    self._typewrite_pynput(text, max(0.0, interval or 0.0))
+                self._typewrite_pynput(text, max(0.0, interval or 0.0))
         elif self.input_method == 'ydotool':
             self._typewrite_ydotool(text, interval)
         elif self.input_method == 'dotool':

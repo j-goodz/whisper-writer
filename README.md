@@ -10,17 +10,31 @@
 
 WhisperWriter is a small speech-to-text app that uses [OpenAI's Whisper model](https://openai.com/research/whisper) to auto-transcribe recordings from a user's microphone to the active window.
 
-Once started, the script runs in the background and waits for a keyboard shortcut to be pressed (`ctrl+shift+space` by default). When the shortcut is pressed, the app starts recording from your microphone. There are four recording modes to choose from:
+Once started, the app runs in the background (optionally hidden to the system tray) and immediately listens for your keyboard shortcut (`ctrl+shift+space` by default). When the shortcut is pressed, the app starts recording from your microphone. There are four recording modes to choose from:
 - `continuous` (default): Recording will stop after a long enough pause in your speech. The app will transcribe the text and then start recording again. To stop listening, press the keyboard shortcut again.
 - `voice_activity_detection`: Recording will stop after a long enough pause in your speech. Recording will not start until the keyboard shortcut is pressed again.
 - `press_to_toggle` Recording will stop when the keyboard shortcut is pressed again. Recording will not start until the keyboard shortcut is pressed again.
 - `hold_to_record` Recording will continue until the keyboard shortcut is released. Recording will not start until the keyboard shortcut is held down again.
 
-You can change the keyboard shortcut (`activation_key`) and recording mode in the [Configuration Options](#configuration-options). While recording and transcribing, a small status window is displayed that shows the current stage of the process (but this can be turned off). Once the transcription is complete, the transcribed text will be automatically written to the active window.
+You can change the keyboard shortcut (`activation_key`) and recording mode in the [Configuration Options](#configuration-options). The Activation Key can be set using a capture dialog: click “Set” and press your desired combo. While recording and transcribing, a small status window is displayed that shows the current stage of the process (but this can be turned off). Once the transcription is complete, the transcribed text will be automatically written to the active window.
 
 The transcription can either be done locally through the [faster-whisper Python package](https://github.com/SYSTRAN/faster-whisper/) or through a request to [OpenAI's API](https://platform.openai.com/docs/guides/speech-to-text). By default, the app will use a local model, but you can change this in the [Configuration Options](#configuration-options). If you choose to use the API, you will need to either provide your OpenAI API key or change the base URL endpoint.
 
 **Fun fact:** Almost the entirety of the initial release of the project was pair-programmed with [ChatGPT-4](https://openai.com/product/gpt-4) and [GitHub Copilot](https://github.com/features/copilot) using VS Code. Practically every line, including most of this README, was written by AI. After the initial prototype was finished, WhisperWriter was used to write a lot of the prompts as well!
+
+## Fork notes
+
+This repository is a fork of the original project by [savbell](https://github.com/savbell/whisper-writer). All credit for the original idea and implementation goes to the upstream author and contributors.
+
+This fork focuses on startup speed, UX polish, and ease of setup. Highlights include:
+- Auto-listen on launch, optional model warm-up, start hidden to tray, and start on Windows login.
+- Tray improvements: single-click to open Settings, quick actions (Start Listening/Recording/Stop), logical separators.
+- Refined Settings UI: grouped sections, scrollable tabs, modern styling, numeric inputs for int/float.
+- Activation Key capture dialog (click Set, then press your preferred combo) with safe pause/resume of hotkey listener during capture.
+- Faster text insertion with paste-only/auto modes and bulk threshold.
+- Faster startup via lazy imports and deferring local model creation until first use; simplified run path.
+
+This fork remains licensed under the GNU GPL, consistent with upstream. Please see [LICENSE](LICENSE) for details. If you use or share this fork, consider starring both this repo and the upstream project.
 
 ## Getting Started
 
@@ -72,7 +86,7 @@ To set up and run the project, follow these steps:
 #### 1. Clone the repository:
 
 ```
-git clone https://github.com/savbell/whisper-writer
+git clone https://github.com/your-username/whisper-writer
 cd whisper-writer
 ```
 
@@ -101,7 +115,7 @@ python run.py
 ```
 
 #### 5. Configure and start WhisperWriter:
-On first run, a Settings window should appear. Once configured and saved, another window will open. Press "Start" to activate the keyboard listener. Press the activation key (`ctrl+shift+space` by default) to start recording and transcribing to the active window.
+On first run, a Settings window should appear. Once configured and saved, the app will start and listen for your activation key immediately. Use the tray icon (single-click) to open Settings any time.
 
 ### Configuration Options
 
@@ -132,16 +146,20 @@ WhisperWriter uses a configuration file to customize its behaviour. To set up th
   - `model_path`: The path to the local Whisper model. If not specified, the default model will be downloaded. (Default: `null`)
 
 #### Recording Options
-- `activation_key`: The keyboard shortcut to activate the recording and transcribing process. Separate keys with a `+`. (Default: `ctrl+shift+space`)
+- `activation_key`: The keyboard shortcut to activate the recording and transcribing process. Separate keys with a `+`. Use the Set button to capture a combo. (Default: `ctrl+shift+space`)
 - `input_backend`: The input backend to use for detecting key presses. `auto` will try to use the best available backend. (Default: `auto`)
 - `recording_mode`: The recording mode to use. Options include `continuous` (auto-restart recording after pause in speech until activation key is pressed again), `voice_activity_detection` (stop recording after pause in speech), `press_to_toggle` (stop recording when activation key is pressed again), `hold_to_record` (stop recording when activation key is released). (Default: `continuous`)
 - `sound_device`: The numeric index of the sound device to use for recording. To find device numbers, run `python -m sounddevice`. (Default: `null`)
 - `sample_rate`: The sample rate in Hz to use for recording. (Default: `16000`)
 - `silence_duration`: The duration in milliseconds to wait for silence before stopping the recording. (Default: `900`)
 - `min_duration`: The minimum duration in milliseconds for a recording to be processed. Recordings shorter than this will be discarded. (Default: `100`)
+- `auto_start_listening`: Start listening for the hotkey on app launch. (Default: `true`)
 
 #### Post-processing Options
+- `writing_mode`: How to insert text: `auto` chooses based on delay/length, `type` sends keystrokes, `paste` uses clipboard. (Default: `auto`)
 - `writing_key_press_delay`: The delay in seconds between each key press when writing the transcribed text. (Default: `0.005`)
+- `bulk_paste_threshold`: In auto mode, paste long text when length exceeds this threshold. (Default: `80`)
+- `paste_when_typing_time_exceeds_ms`: In auto mode, paste when estimated typing time (characters × per-key delay) would exceed this many milliseconds. (Default: `1000`)
 - `remove_trailing_period`: Set to `true` to remove the trailing period from the transcribed text. (Default: `false`)
 - `add_trailing_space`: Set to `true` to add a space to the end of the transcribed text. (Default: `true`)
 - `remove_capitalization`: Set to `true` to convert the transcribed text to lowercase. (Default: `false`)
@@ -151,6 +169,9 @@ WhisperWriter uses a configuration file to customize its behaviour. To set up th
 - `print_to_terminal`: Set to `true` to print the script status and transcribed text to the terminal. (Default: `true`)
 - `hide_status_window`: Set to `true` to hide the status window during operation. (Default: `false`)
 - `noise_on_completion`: Set to `true` to play a noise after the transcription has been typed out. (Default: `false`)
+- `start_hidden`: Start minimized to tray. (Default: `true`)
+- `start_on_login`: Launch WhisperWriter when you sign in to Windows. (Default: `true`)
+- `warm_up_model_on_launch`: If using a local model, load it in the background on launch to reduce the first transcription delay. (Default: `true`)
 
 If any of the configuration options are invalid or not provided, the program will use the default values.
 
@@ -175,7 +196,7 @@ Implemented features can be found in the [CHANGELOG](CHANGELOG.md).
 
 ## Contributing
 
-Contributions are welcome! I created this project for my own personal use and didn't expect it to get much attention, so I haven't put much effort into testing or making it easy for others to contribute. If you have ideas or suggestions, feel free to [open a pull request](https://github.com/savbell/whisper-writer/pulls) or [create a new issue](https://github.com/savbell/whisper-writer/issues/new). I'll do my best to review and respond as time allows.
+Contributions are welcome! Please see [CONTRIBUTING](CONTRIBUTING.md) for setup notes and guidelines. If you have ideas or suggestions, feel free to open a PR or create a new issue.
 
 ## Credits
 

@@ -141,7 +141,7 @@ class ResultThread(QThread):
             data_ready.set()
 
         with sd.InputStream(samplerate=self.sample_rate, channels=1, dtype='int16',
-                            blocksize=frame_size, device=recording_options.get('sound_device'),
+                            blocksize=frame_size, device=recording_options.get('sound_device') or None,
                             callback=audio_callback):
             while self.is_running and self.is_recording:
                 data_ready.wait()

@@ -150,6 +150,10 @@ post_processing:
     value: 80
     type: int
     description: "If delay is 0 and text length exceeds this threshold, use fast clipboard paste instead of per-key typing."
+  paste_when_typing_time_exceeds_ms:
+    value: 1000
+    type: int
+    description: "In auto mode, paste when estimated typing time (chars * delay) would exceed this many ms."
   remove_trailing_period:
     value: false
     type: bool

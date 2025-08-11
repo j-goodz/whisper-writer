@@ -152,6 +152,8 @@ class SettingsWindow(BaseWindow):
 
         if key == 'activation_key' and meta_type == 'str':
             return self.create_activation_key_input(current_value)
+        if key == 'sound_device':
+            return self.create_sound_device_input(current_value)
         if meta_type == 'bool':
             return self.create_checkbox(current_value, key)
         elif meta_type == 'str' and 'options' in meta:
@@ -211,11 +213,70 @@ class SettingsWindow(BaseWindow):
         container.setLayout(layout)
         return container
 
+    def create_sound_device_input(self, value: str | None):
+        line = QLineEdit(str(value) if value is not None else '')
+        select_btn = QPushButton('Select')
+        def on_select():
+            try:
+                idx = self.select_sound_device_dialog()
+            except Exception as e:
+                QMessageBox.warning(self, 'Sound devices', f'Unable to query audio devices.\n{e}')
+                return
+            if idx is not None:
+                line.setText(str(idx))
+        select_btn.clicked.connect(on_select)
+        layout = QHBoxLayout()
+        layout.addWidget(line)
+        layout.addWidget(select_btn)
+        layout.setContentsMargins(0, 0, 0, 0)
+        container = QWidget()
+        container.setLayout(layout)
+        return container
+
     def capture_activation_combo(self) -> str:
         dialog = KeyCaptureDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             return dialog.combo_string()
         return ''
+
+    def select_sound_device_dialog(self) -> int | None:
+        try:
+            import sounddevice as sd
+            devices = sd.query_devices()
+            hostapis = sd.query_hostapis()
+        except Exception as e:
+            raise e
+
+        entries = [(None, "System default (Windows / OS default)")]
+        for i, d in enumerate(devices):
+            if d.get('max_input_channels', 0) > 0:
+                api = hostapis[d['hostapi']]['name'] if isinstance(d.get('hostapi'), int) and d['hostapi'] < len(hostapis) else 'Unknown API'
+                name = d.get('name', f'Device {i}')
+                entries.append((i, f"{i}: {name} ({api})"))
+
+        if not entries:
+            QMessageBox.information(self, 'Sound devices', 'No input devices found.')
+            return None
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle('Select audio input device')
+        dlg.setModal(True)
+        dlg.setFixedSize(520, 360)
+        v = QVBoxLayout(dlg)
+        label = QLabel('Choose an input device for recording:')
+        v.addWidget(label)
+        from PyQt5.QtWidgets import QListWidget
+        lst = QListWidget()
+        for _, text in entries:
+            lst.addItem(text)
+        v.addWidget(lst)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        v.addWidget(btns)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        if dlg.exec_() == QDialog.Accepted and lst.currentRow() >= 0:
+            return entries[lst.currentRow()][0]
+        return None
 
     def create_numeric_input(self, value, value_type):
         from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox
