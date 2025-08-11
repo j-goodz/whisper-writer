@@ -3,7 +3,8 @@ import sys
 from dotenv import set_key, load_dotenv
 from PyQt5.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QCheckBox,
-    QMessageBox, QTabWidget, QWidget, QSizePolicy, QSpacerItem, QToolButton, QStyle, QFileDialog
+    QMessageBox, QTabWidget, QWidget, QSizePolicy, QSpacerItem, QToolButton, QStyle, QFileDialog,
+    QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, pyqtSignal
 
@@ -16,6 +17,8 @@ load_dotenv()
 class SettingsWindow(BaseWindow):
     settings_closed = pyqtSignal()
     settings_saved = pyqtSignal()
+    listening_pause_request = pyqtSignal()
+    listening_resume_request = pyqtSignal()
 
     def __init__(self):
         """Initialize the settings window."""
@@ -147,6 +150,8 @@ class SettingsWindow(BaseWindow):
         meta_type = meta.get('type')
         current_value = self.get_config_value(category, sub_category, key, meta)
 
+        if key == 'activation_key' and meta_type == 'str':
+            return self.create_activation_key_input(current_value)
         if meta_type == 'bool':
             return self.create_checkbox(current_value, key)
         elif meta_type == 'str' and 'options' in meta:
@@ -186,6 +191,31 @@ class SettingsWindow(BaseWindow):
             container.setLayout(layout)
             return container
         return widget
+
+    def create_activation_key_input(self, value: str):
+        line = QLineEdit(value or '')
+        line.setReadOnly(True)
+        set_btn = QPushButton('Set')
+        def on_set():
+            self.listening_pause_request.emit()
+            combo = self.capture_activation_combo()
+            if combo:
+                line.setText(combo)
+            self.listening_resume_request.emit()
+        set_btn.clicked.connect(on_set)
+        layout = QHBoxLayout()
+        layout.addWidget(line)
+        layout.addWidget(set_btn)
+        layout.setContentsMargins(0, 0, 0, 0)
+        container = QWidget()
+        container.setLayout(layout)
+        return container
+
+    def capture_activation_combo(self) -> str:
+        dialog = KeyCaptureDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            return dialog.combo_string()
+        return ''
 
     def create_numeric_input(self, value, value_type):
         from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox
@@ -430,3 +460,86 @@ class SettingsWindow(BaseWindow):
                 padding: 0 4px;
             }
         """)
+
+class KeyCaptureDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Press desired activation combo')
+        self.setModal(True)
+        self.setFixedSize(420, 160)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        v = QVBoxLayout(self)
+        self.label = QLabel('Press keys (including modifiers). Release to confirm. Esc to cancel.')
+        v.addWidget(self.label)
+        self.combo_view = QLineEdit()
+        self.combo_view.setReadOnly(True)
+        v.addWidget(self.combo_view)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+        buttons.rejected.connect(self.reject)
+        v.addWidget(buttons)
+
+        self.pressed = set()
+        self.result_combo = ''
+
+    def keyPressEvent(self, event):
+        key = self._key_to_string(event)
+        if key:
+            self.pressed.add(key)
+            self._update_view()
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+            return
+        # On last release, accept the combo
+        key = self._key_to_string(event)
+        if key and key in self.pressed:
+            self.pressed.discard(key)
+        if not self.pressed:
+            # Build canonical combo order: CTRL+SHIFT+ALT+META+...+KEY
+            mods = []
+            others = []
+            for k in list(self._last_combo):
+                if k in ('CTRL', 'SHIFT', 'ALT', 'META'):
+                    mods.append(k)
+                else:
+                    others.append(k)
+            combo = '+'.join(mods + others)
+            self.result_combo = combo
+            self.accept()
+
+    def _update_view(self):
+        self._last_combo = sorted(self.pressed)
+        self.combo_view.setText('+'.join(self._last_combo))
+
+    def _key_to_string(self, event) -> str:
+        key = event.key()
+        if key in (Qt.Key_Control, Qt.Key_Meta):
+            return 'CTRL' if key == Qt.Key_Control else 'META'
+        if key in (Qt.Key_Shift,):
+            return 'SHIFT'
+        if key in (Qt.Key_Alt,):
+            return 'ALT'
+        # Convert printable keys and function keys
+        if Qt.Key_F1 <= key <= Qt.Key_F24:
+            return f'F{key - Qt.Key_F1 + 1}'
+        text = event.text().upper()
+        if text:
+            # Normalize special characters
+            mapping = {
+                ' ': 'SPACE', '-': 'MINUS', '=': 'EQUALS', '[': 'LEFT_BRACKET', ']': 'RIGHT_BRACKET',
+                ';': 'SEMICOLON', "'": 'QUOTE', '`': 'BACKQUOTE', '\\': 'BACKSLASH', ',': 'COMMA', '.': 'PERIOD', '/': 'SLASH'
+            }
+            return mapping.get(text, text)
+        # Arrow and other special keys
+        specials = {
+            Qt.Key_Left: 'LEFT', Qt.Key_Right: 'RIGHT', Qt.Key_Up: 'UP', Qt.Key_Down: 'DOWN',
+            Qt.Key_Return: 'ENTER', Qt.Key_Enter: 'ENTER', Qt.Key_Tab: 'TAB', Qt.Key_Backspace: 'BACKSPACE',
+            Qt.Key_Escape: 'ESC', Qt.Key_Insert: 'INSERT', Qt.Key_Delete: 'DELETE', Qt.Key_Home: 'HOME',
+            Qt.Key_End: 'END', Qt.Key_PageUp: 'PAGE_UP', Qt.Key_PageDown: 'PAGE_DOWN',
+        }
+        return specials.get(key, '')
+
+    def combo_string(self) -> str:
+        return self.result_combo

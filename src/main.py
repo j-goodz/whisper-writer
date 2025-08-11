@@ -163,6 +163,9 @@ class WhisperWriterApp(QObject):
             self.settings_window = SettingsWindow()
             self.settings_window.settings_closed.connect(self.on_settings_closed)
             self.settings_window.settings_saved.connect(self.restart_app)
+            # Pause/resume listening while capturing activation key
+            self.settings_window.listening_pause_request.connect(self._pause_listening_for_capture)
+            self.settings_window.listening_resume_request.connect(self._resume_listening_after_capture)
 
     def cleanup(self):
         if self.key_listener:
@@ -241,6 +244,21 @@ class WhisperWriterApp(QObject):
         """
         if self.result_thread and self.result_thread.isRunning():
             self.result_thread.stop()
+
+    def _pause_listening_for_capture(self):
+        self._was_listening = self.key_listener.is_running()
+        if self._was_listening:
+            try:
+                self.key_listener.stop()
+            except Exception:
+                pass
+
+    def _resume_listening_after_capture(self):
+        if getattr(self, '_was_listening', False):
+            try:
+                self.key_listener.start()
+            except Exception:
+                pass
 
     def on_transcription_complete(self, result):
         """

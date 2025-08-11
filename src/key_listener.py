@@ -285,6 +285,7 @@ class KeyListener:
             "on_activate": [],
             "on_deactivate": []
         }
+        self._is_running = False
         self.load_activation_keys()
         self.initialize_backends()
         self.select_backend_from_config()
@@ -343,6 +344,7 @@ class KeyListener:
         """Start the active backend."""
         if self.active_backend:
             self.active_backend.start()
+            self._is_running = True
         else:
             raise RuntimeError("No active backend selected")
 
@@ -350,6 +352,11 @@ class KeyListener:
         """Stop the active backend."""
         if self.active_backend:
             self.active_backend.stop()
+            self._is_running = False
+
+    def is_running(self) -> bool:
+        """Return whether the listener is currently running."""
+        return bool(self._is_running)
 
     def load_activation_keys(self):
         """Load activation keys from configuration."""
