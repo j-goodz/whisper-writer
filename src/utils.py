@@ -1,6 +1,7 @@
 import yaml
 import os
 import sys
+import datetime
 
 class ConfigManager:
     _instance = None
@@ -167,3 +168,19 @@ class ConfigManager:
         """Print a message to the console if enabled in the configuration."""
         if cls._instance and cls._instance.config['misc']['print_to_terminal']:
             print(message)
+
+
+class Logger:
+    """Lightweight logger that writes timestamped lines to stdout (captured by run.py)."""
+
+    @staticmethod
+    def log(message: str) -> None:
+        try:
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{timestamp}] {message}")
+        except Exception:
+            # Always remain non-fatal
+            try:
+                print(message)
+            except Exception:
+                pass

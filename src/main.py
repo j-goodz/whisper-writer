@@ -13,7 +13,7 @@ from ui.settings_window import SettingsWindow
 from ui.status_window import StatusWindow
 from transcription import create_local_model
 from input_simulation import InputSimulator
-from utils import ConfigManager
+from utils import ConfigManager, Logger
 
 
 class WhisperWriterApp(QObject):
@@ -22,6 +22,7 @@ class WhisperWriterApp(QObject):
         Initialize the application, opening settings window if no configuration file is found.
         """
         super().__init__()
+        Logger.log('WhisperWriterApp initializing')
         self.app = QApplication(sys.argv)
         # Keep app running in tray even when all windows are closed
         self.app.setQuitOnLastWindowClosed(False)
@@ -33,14 +34,16 @@ class WhisperWriterApp(QObject):
         self.app.setWindowIcon(QIcon(os.path.join('assets', 'ww-logo.png')))
 
         ConfigManager.initialize()
+        Logger.log('Configuration initialized')
 
         # Defer creating heavy/optional UI until needed
         self.settings_window = None
 
         if ConfigManager.config_file_exists():
+            Logger.log('Configuration file found; initializing components')
             self.initialize_components()
         else:
-            print('No valid configuration file found. Opening settings window...')
+            Logger.log('No configuration file found. Opening settings window...')
             self.ensure_settings_window()
             self.settings_window.show()
 
@@ -48,6 +51,7 @@ class WhisperWriterApp(QObject):
         """
         Initialize the components of the application.
         """
+        Logger.log('Initializing components')
         self.input_simulator = InputSimulator()
 
         self.key_listener = KeyListener()
@@ -76,20 +80,25 @@ class WhisperWriterApp(QObject):
                 self.game_status_window = None
 
         self.create_tray_icon()
+        Logger.log('System tray initialized')
 
         # Auto-start behaviors
         if ConfigManager.get_config_value('misc', 'start_hidden'):
             self.main_window.hide()
+            Logger.log('Main window hidden on start')
         else:
             self.main_window.show()
+            Logger.log('Main window shown on start')
 
         if ConfigManager.get_config_value('recording_options', 'auto_start_listening'):
             # Start the listener immediately so hotkey works after boot
             self.key_listener.start()
+            Logger.log('Key listener auto-started')
 
         # Optional warm-up of local model
         if not ConfigManager.get_config_value('model_options', 'use_api') and ConfigManager.get_config_value('misc', 'warm_up_model_on_launch'):
             # Load the model in a minimal delayed single-shot to avoid blocking UI
+            Logger.log('Scheduling local model warm-up')
             QTimer.singleShot(100, self._warm_up_model)
 
         # Apply Windows startup setting on launch as well
@@ -107,12 +116,16 @@ class WhisperWriterApp(QObject):
             self._perf_timer.timeout.connect(self._check_fullscreen_and_guard)
             self._perf_timer.start(int(interval))
             self._is_game_active = False
+            Logger.log(f'Performance guard enabled (interval={interval} ms)')
 
     def _warm_up_model(self):
         if self.local_model is None:
             try:
+                Logger.log('Warming up local model...')
                 self.local_model = create_local_model()
+                Logger.log('Local model ready')
             except Exception:
+                Logger.log('Local model warm-up failed; continuing without pre-load')
                 pass
 
     def _check_fullscreen_and_guard(self):
@@ -129,12 +142,14 @@ class WhisperWriterApp(QObject):
                     self.key_listener.stop()
                 except Exception:
                     pass
+                Logger.log(f'Paused key listener due to fullscreen app: {app_name}')
             # Unload local model if configured
             if ConfigManager.get_config_value('performance', 'suspend_local_model_on_game') and self.local_model is not None:
                 try:
                     self.local_model = None
                 except Exception:
                     pass
+                Logger.log('Suspended local model due to fullscreen app')
             if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window') and getattr(self, 'game_status_window', None):
                 try:
                     self.game_status_window.show_paused(app_name)
@@ -148,10 +163,12 @@ class WhisperWriterApp(QObject):
                     self.key_listener.start()
                 except Exception:
                     pass
+                Logger.log('Resumed key listener after leaving fullscreen app')
             # Warm up model after game if desired
             if (not ConfigManager.get_config_value('model_options', 'use_api') and
                 ConfigManager.get_config_value('performance', 'warm_up_model_after_game')):
                 QTimer.singleShot(100, self._warm_up_model)
+                Logger.log('Scheduling local model warm-up after game')
             if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window') and getattr(self, 'game_status_window', None):
                 try:
                     self.game_status_window.show_resumed()
@@ -332,11 +349,13 @@ class WhisperWriterApp(QObject):
         """
         Exit the application.
         """
+        Logger.log('Exit requested; shutting down')
         self.cleanup()
         QApplication.quit()
 
     def restart_app(self):
         """Restart the application to apply the new settings."""
+        Logger.log('Restart requested; shutting down and relaunching')
         self.cleanup()
         QApplication.quit()
         QProcess.startDetached(sys.executable, sys.argv)
@@ -357,6 +376,7 @@ class WhisperWriterApp(QObject):
         """
         Called when the activation key combination is pressed.
         """
+        Logger.log('Activation key pressed')
         if self.result_thread and self.result_thread.isRunning():
             recording_mode = ConfigManager.get_config_value('recording_options', 'recording_mode')
             if recording_mode == 'press_to_toggle':
@@ -371,6 +391,7 @@ class WhisperWriterApp(QObject):
         """
         Called when the activation key combination is released.
         """
+        Logger.log('Activation key released')
         if ConfigManager.get_config_value('recording_options', 'recording_mode') == 'hold_to_record':
             if self.result_thread and self.result_thread.isRunning():
                 self.result_thread.stop_recording()
@@ -384,6 +405,7 @@ class WhisperWriterApp(QObject):
 
         # Create local model on first transcription if needed
         if self.local_model is None and not ConfigManager.get_config_value('model_options', 'use_api'):
+            Logger.log('Creating local model for first transcription')
             self.local_model = create_local_model()
 
         self.result_thread = ResultThread(self.local_model)
@@ -392,6 +414,7 @@ class WhisperWriterApp(QObject):
             self.status_window.closeSignal.connect(self.stop_result_thread)
         self.result_thread.resultSignal.connect(self.on_transcription_complete)
         self.result_thread.start()
+        Logger.log('Result thread started (recording)')
 
     def stop_result_thread(self):
         """
@@ -399,6 +422,7 @@ class WhisperWriterApp(QObject):
         """
         if self.result_thread and self.result_thread.isRunning():
             self.result_thread.stop()
+            Logger.log('Result thread stop requested')
 
     def _pause_listening_for_capture(self):
         self._was_listening = self.key_listener.is_running()
@@ -419,6 +443,7 @@ class WhisperWriterApp(QObject):
         """
         When the transcription is complete, type the result and start listening for the activation key again.
         """
+        Logger.log(f'Transcription complete (chars={len(result) if isinstance(result, str) else "n/a"})')
         # If using paste path and no focus target, warn instead of silently doing nothing
         try:
             will_paste = self.input_simulator.should_use_paste(result)
@@ -438,6 +463,7 @@ class WhisperWriterApp(QObject):
                     self.status_window.updateStatus('transcribing')
                 except Exception:
                     pass
+            Logger.log('Inserting transcription into active window')
             self.input_simulator.typewrite(result)
             if not ConfigManager.get_config_value('misc', 'hide_status_window'):
                 try:
@@ -447,6 +473,7 @@ class WhisperWriterApp(QObject):
 
         if ConfigManager.get_config_value('misc', 'noise_on_completion'):
             AudioPlayer(os.path.join('assets', 'beep.wav')).play(block=True)
+            Logger.log('Played completion sound')
 
         if ConfigManager.get_config_value('recording_options', 'recording_mode') == 'continuous':
             self.start_result_thread()

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from enum import Enum, auto
 from typing import Callable, Set
 
-from utils import ConfigManager
+from utils import ConfigManager, Logger
 
 
 class InputEvent(Enum):
@@ -311,10 +311,10 @@ class KeyListener:
                 try:
                     self.set_active_backend(backend_map[preferred_backend])
                 except ValueError:
-                    print(f"Preferred backend '{preferred_backend}' is not available. Falling back to auto selection.")
+                    Logger.log(f"Preferred backend '{preferred_backend}' is not available. Falling back to auto selection.")
                     self.select_active_backend()
             else:
-                print(f"Unknown backend '{preferred_backend}'. Falling back to auto selection.")
+                Logger.log(f"Unknown backend '{preferred_backend}'. Falling back to auto selection.")
                 self.select_active_backend()
 
     def select_active_backend(self):
@@ -383,7 +383,7 @@ class KeyListener:
                     keycode = KeyCode[key]
                     keys.add(keycode)
                 except KeyError:
-                    print(f"Unknown key: {key}")
+                    Logger.log(f"Unknown key: {key}")
         return keys
 
     def set_activation_keys(self, keys: Set[KeyCode]):
@@ -459,7 +459,7 @@ class EvdevBackend(InputBackend):
         import signal
 
         def signal_handler(signum, frame):
-            print("Received termination signal. Stopping evdev backend...")
+            Logger.log("Received termination signal. Stopping evdev backend...")
             self.stop()
 
         signal.signal(signal.SIGTERM, signal_handler)
@@ -473,7 +473,7 @@ class EvdevBackend(InputBackend):
         if self.thread:
             self.thread.join(timeout=1)  # Wait for up to 1 second
             if self.thread.is_alive():
-                print("Thread did not terminate in time. Forcing exit.")
+                Logger.log("Thread did not terminate in time. Forcing exit.")
 
         # Close all devices
         for device in self.devices:
@@ -501,7 +501,7 @@ class EvdevBackend(InputBackend):
             except Exception as e:
                 if self.stop_event.is_set():
                     break
-                print(f"Unexpected error in _listen_loop: {e}")
+                Logger.log(f"Unexpected error in _listen_loop: {e}")
 
     def _read_device_events(self, device):
         """Read and process events from a single device."""
@@ -518,10 +518,10 @@ class EvdevBackend(InputBackend):
         if isinstance(error, BlockingIOError) and error.errno == errno.EAGAIN:
             return  # Non-blocking IO is expected, just continue
         if isinstance(error, OSError) and (error.errno == errno.EBADF or error.errno == errno.ENODEV):
-            print(f"Device {device.path} is no longer available. Removing it.")
+            Logger.log(f"Device {device.path} is no longer available. Removing it.")
             self.devices.remove(device)
         else:
-            print(f"Unexpected error reading device: {error}")
+            Logger.log(f"Unexpected error reading device: {error}")
 
     def _handle_input_event(self, event):
         """Process a single input event."""

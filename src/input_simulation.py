@@ -4,7 +4,7 @@ import signal
 import time
 from pynput.keyboard import Controller as PynputController, Key
 
-from utils import ConfigManager
+from utils import ConfigManager, Logger
 
 def run_command_or_exit_on_failure(command):
     """
@@ -16,7 +16,7 @@ def run_command_or_exit_on_failure(command):
     try:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Error running command: {e}")
+        Logger.log(f"Error running command: {e}")
         exit(1)
 
 class InputSimulator:

@@ -4,13 +4,16 @@ from dotenv import set_key, load_dotenv
 from PyQt5.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QCheckBox,
     QMessageBox, QTabWidget, QWidget, QSizePolicy, QSpacerItem, QToolButton, QStyle, QFileDialog,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QPlainTextEdit
 )
-from PyQt5.QtCore import Qt, QCoreApplication, QProcess, pyqtSignal
+from PyQt5.QtCore import Qt, QCoreApplication, QProcess, pyqtSignal, QTimer, QUrl
+from PyQt5.QtGui import QDesktopServices, QFont
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ui.base_window import BaseWindow
+from ui.key_capture_dialog import KeyCaptureDialog
 from utils import ConfigManager
+from ui.settings.performance_tab import build_performance_widget
 
 load_dotenv()
 
@@ -46,6 +49,12 @@ class SettingsWindow(BaseWindow):
 
         self.create_tabs()
 
+        # Add Logs tab for viewing application log
+        self._log_timer = None
+        self._log_last_mtime = 0.0
+        self._log_path = self._resolve_log_path()
+        self.create_logs_tab()
+
         # Footer actions
         self.create_buttons()
 
@@ -77,6 +86,113 @@ class SettingsWindow(BaseWindow):
             tab_title = 'Gaming and Performance' if category == 'performance' else category.replace('_', ' ').capitalize()
             self.tabs.addTab(scroll, tab_title)
 
+    def _resolve_log_path(self) -> str:
+        """Find the current log file path used by the launcher."""
+        try:
+            base_dir = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+            candidate = os.path.join(base_dir, "WhisperWriter", "logs", "whisper-writer.log")
+            if os.path.isfile(candidate):
+                return candidate
+        except Exception:
+            pass
+        # Fallback to repo root next to run.py
+        try:
+            repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            candidate = os.path.join(repo_dir, 'whisper-writer.log')
+            return candidate
+        except Exception:
+            return 'whisper-writer.log'
+
+    def create_logs_tab(self):
+        """Create the Logs tab UI with viewer and actions."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        top_bar = QHBoxLayout()
+        path_label = QLabel(f"Log file: {self._log_path}")
+        path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        top_bar.addWidget(path_label)
+        top_bar.addStretch(1)
+
+        open_btn = QPushButton('Open in Explorer')
+        open_btn.clicked.connect(self._open_log_in_explorer)
+        top_bar.addWidget(open_btn)
+
+        refresh_btn = QPushButton('Refresh')
+        refresh_btn.clicked.connect(self._refresh_log)
+        top_bar.addWidget(refresh_btn)
+
+        clear_btn = QPushButton('Clear log')
+        clear_btn.clicked.connect(self._clear_log)
+        top_bar.addWidget(clear_btn)
+
+        layout.addLayout(top_bar)
+
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setLineWrapMode(QPlainTextEdit.NoWrap)
+        font = QFont('Consolas')
+        font.setStyleHint(QFont.Monospace)
+        self.log_view.setFont(font)
+        layout.addWidget(self.log_view)
+
+        container.setLayout(layout)
+        self.tabs.addTab(container, 'Logs')
+
+        # Auto-refresh periodically to mimic tail -f
+        self._log_timer = QTimer(self)
+        self._log_timer.setInterval(1500)
+        self._log_timer.timeout.connect(self._refresh_log_incremental)
+        self._log_timer.start()
+        # Initial load
+        self._refresh_log(full=True)
+
+    def _open_log_in_explorer(self):
+        try:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self._log_path))
+        except Exception as e:
+            QMessageBox.warning(self, 'Open log', f'Unable to open log file.\n{e}')
+
+    def _clear_log(self):
+        try:
+            with open(self._log_path, 'w', encoding='utf-8'):
+                pass
+            self.log_view.clear()
+            self._log_last_mtime = 0.0
+        except Exception as e:
+            QMessageBox.warning(self, 'Clear log', f'Unable to clear log file.\n{e}')
+
+    def _refresh_log(self, full: bool = True):
+        try:
+            if not os.path.isfile(self._log_path):
+                self.log_view.setPlainText('(Log file not found yet)')
+                self._log_last_mtime = 0.0
+                return
+            with open(self._log_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            self.log_view.setPlainText(content)
+            self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
+            self._log_last_mtime = os.path.getmtime(self._log_path)
+        except Exception as e:
+            self.log_view.setPlainText(f'(Unable to read log)\n{e}')
+
+    def _refresh_log_incremental(self):
+        try:
+            if not os.path.isfile(self._log_path):
+                return
+            mtime = os.path.getmtime(self._log_path)
+            if mtime <= self._log_last_mtime:
+                return
+            with open(self._log_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            self.log_view.setPlainText(content)
+            self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
+            self._log_last_mtime = mtime
+        except Exception:
+            pass
+
     def create_settings_widgets(self, layout, category, settings):
         """Create widgets for each setting in a category, grouped per sub-category."""
         from PyQt5.QtWidgets import QGroupBox, QVBoxLayout
@@ -100,9 +216,7 @@ class SettingsWindow(BaseWindow):
 
         # Add running process selectors and list previews in performance tab
         if category == 'performance':
-            layout.addLayout(self._build_process_selector())
-            layout.addSpacing(8)
-            layout.addLayout(self._build_process_lists_preview())
+            layout.addWidget(build_performance_widget(self))
 
     def create_buttons(self):
         """Create reset and save buttons in a bottom action bar."""
@@ -156,253 +270,10 @@ class SettingsWindow(BaseWindow):
                     pass
 
     def _build_process_selector(self):
-        from PyQt5.QtWidgets import QListWidget, QAbstractItemView, QLineEdit
-        wrapper = QHBoxLayout()
-        wrapper.setSpacing(12)
-        left = QVBoxLayout()
-        left.setSpacing(6)
-        right = QVBoxLayout()
-        right.setSpacing(6)
-
-        left.addWidget(QLabel('Running processes'))
-        search_box = QLineEdit()
-        search_box.setPlaceholderText('Search processes...')
-        left.addWidget(search_box)
-        proc_list = QListWidget()
-        proc_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        proc_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        left.addWidget(proc_list)
-
-        def refresh_processes():
-            try:
-                import psutil
-                proc_list.clear()
-                seen = set()
-                self._all_running_procs = []
-                for p in psutil.process_iter(['name']):
-                    name = (p.info.get('name') or '').strip()
-                    if not name:
-                        continue
-                    nl = name.lower()
-                    if nl in seen:
-                        continue
-                    seen.add(nl)
-                    self._all_running_procs.append(name)
-                # Apply current filter
-                apply_filter(search_box.text())
-            except Exception:
-                QMessageBox.warning(self, 'Processes', 'Unable to enumerate running processes.')
-
-        def apply_filter(text: str):
-            proc_list.clear()
-            if not hasattr(self, '_all_running_procs'):
-                return
-            needle = (text or '').lower().strip()
-            ignore = ConfigManager.get_config_value('performance', 'ignore_processes') or []
-            force = ConfigManager.get_config_value('performance', 'force_game_processes') or []
-            excluded = set([x.lower() for x in ignore] + [x.lower() for x in force])
-            for name in sorted(self._all_running_procs, key=lambda s: s.lower()):
-                if name.lower() in excluded:
-                    continue
-                if not needle or needle in name.lower():
-                    proc_list.addItem(name)
-
-        search_box.textChanged.connect(apply_filter)
-        # Expose filter and search box so other panels can update the running list dynamically
-        self._proc_apply_filter = apply_filter
-        self._proc_search_box = search_box
-
-        buttons_row = QHBoxLayout()
-        btn_refresh = QPushButton('Refresh')
-        btn_refresh.clicked.connect(refresh_processes)
-        buttons_row.addWidget(btn_refresh)
-        left.addLayout(buttons_row)
-
-        quick_add_label = QLabel('Quick add to lists')
-        right.addWidget(quick_add_label)
-        btn_add_ignore = QPushButton('Add selected to Never enter Gaming Mode')
-        btn_add_ignore.setToolTip('These apps will not enter Gaming Mode (hotkey/model not affected).')
-        btn_add_force = QPushButton('Add selected to Always enter Gaming Mode')
-        btn_add_force.setToolTip('These apps will always be treated as games and enter Gaming Mode.')
-        right.addWidget(btn_add_ignore)
-        right.addWidget(btn_add_force)
-
-        def add_selected(target_key):
-            try:
-                selected = [i.text() for i in proc_list.selectedItems()]
-                if not selected:
-                    return
-                # Merge with existing config list
-                current = list(ConfigManager.get_config_value('performance', target_key) or [])
-                current_lc = set([str(x).lower() for x in current])
-                for name in selected:
-                    nl = name.lower()
-                    if nl not in current_lc:
-                        current.append(name)
-                        current_lc.add(nl)
-                # Enforce exclusivity across lists
-                other_key = 'force_game_processes' if target_key == 'ignore_processes' else 'ignore_processes'
-                other = list(ConfigManager.get_config_value('performance', other_key) or [])
-                other = [x for x in other if x.lower() not in [s.lower() for s in selected]]
-                # Save back to config object only (persist on Save)
-                ConfigManager.set_config_value(current, 'performance', target_key)
-                ConfigManager.set_config_value(other, 'performance', other_key)
-                friendly = 'Never enter Gaming Mode' if target_key == 'ignore_processes' else 'Always enter Gaming Mode'
-                QMessageBox.information(self, 'Added', f'Added {len(selected)} process(es) to {friendly}. Changes will be saved on Save.')
-                # Refresh lists and remove from running list view
-                if hasattr(self, '_refresh_perf_lists') and callable(self._refresh_perf_lists):
-                    try:
-                        self._refresh_perf_lists()
-                    except Exception:
-                        pass
-                apply_filter(search_box.text())
-            except Exception as e:
-                QMessageBox.warning(self, 'Error', f'Could not add selected items.\n{e}')
-
-        btn_add_ignore.clicked.connect(lambda: add_selected('ignore_processes'))
-        btn_add_force.clicked.connect(lambda: add_selected('force_game_processes'))
-
-        wrapper.addLayout(left, 3)
-        wrapper.addSpacing(12)
-        wrapper.addLayout(right, 2)
-        refresh_processes()
-        return wrapper
+        pass
 
     def _build_process_lists_preview(self):
-        from PyQt5.QtWidgets import QListWidget, QAbstractItemView
-        container = QHBoxLayout()
-        container.setSpacing(12)
-        # Left (Never enter Gaming Mode)
-        ignore_col = QVBoxLayout()
-        ignore_col.setSpacing(6)
-        # Right (Always enter Gaming Mode)
-        force_col = QVBoxLayout()
-        force_col.setSpacing(6)
-        # Middle controls
-        middle_col = QVBoxLayout()
-        middle_col.setSpacing(12)
-
-        ignore_label = QLabel("Never enter Gaming Mode for these processes (ignore list)")
-        force_label = QLabel("Always enter Gaming Mode for these processes (treat as game)")
-        ignore_label.setWordWrap(True)
-        force_label.setWordWrap(True)
-        ignore_list = QListWidget()
-        force_list = QListWidget()
-        ignore_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        force_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        ignore_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        force_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-        def refresh_lists():
-            ignore = [str(x).lower() for x in (ConfigManager.get_config_value('performance', 'ignore_processes') or [])]
-            force = [str(x).lower() for x in (ConfigManager.get_config_value('performance', 'force_game_processes') or [])]
-            ignore_list.clear()
-            force_list.clear()
-            for name in ignore:
-                ignore_list.addItem(name)
-            for name in force:
-                force_list.addItem(name)
-        # Expose refresher for use by other handlers
-        self._refresh_perf_lists = refresh_lists
-
-        # Per-list controls
-        btn_refresh_ignore = QPushButton('Refresh')
-        btn_remove_ignore = QPushButton('Remove selected')
-        btn_refresh_force = QPushButton('Refresh')
-        btn_remove_force = QPushButton('Remove selected')
-        # Middle move button toggles direction based on which list has selection
-        btn_move_toggle = QPushButton('Move selected ↔')
-
-        def remove_selected(target_key, list_widget):
-            try:
-                selected = [i.text() for i in list_widget.selectedItems()]
-                if not selected:
-                    return
-                current = ConfigManager.get_config_value('performance', target_key) or []
-                current_lc = [str(x).lower() for x in current]
-                remaining = [x for x in current if x.lower() not in [s.lower() for s in selected]]
-                if len(remaining) != len(current):
-                    ConfigManager.set_config_value(remaining, 'performance', target_key)
-                    # No dialog spam; lists update visually
-                    refresh_lists()
-                    # Also repopulate the running processes list intelligently
-                    if hasattr(self, '_proc_apply_filter') and hasattr(self, '_proc_search_box'):
-                        try:
-                            self._proc_apply_filter(self._proc_search_box.text())
-                        except Exception:
-                            pass
-            except Exception as e:
-                QMessageBox.warning(self, 'Error', f'Could not remove selected items.\n{e}')
-
-        def move_toggle():
-            try:
-                sel_ignore = [i.text() for i in ignore_list.selectedItems()]
-                sel_force = [i.text() for i in force_list.selectedItems()]
-                ignore = ConfigManager.get_config_value('performance', 'ignore_processes') or []
-                force = ConfigManager.get_config_value('performance', 'force_game_processes') or []
-                ignore_lc = set([x.lower() for x in ignore])
-                force_lc = set([x.lower() for x in force])
-                changed = False
-                if sel_ignore:
-                    # Move from ignore -> force
-                    ignore = [x for x in ignore if x.lower() not in [s.lower() for s in sel_ignore]]
-                    for name in sel_ignore:
-                        if name.lower() not in force_lc:
-                            force.append(name)
-                            force_lc.add(name.lower())
-                            changed = True
-                if sel_force:
-                    # Move from force -> ignore
-                    force = [x for x in force if x.lower() not in [s.lower() for s in sel_force]]
-                    for name in sel_force:
-                        if name.lower() not in ignore_lc:
-                            ignore.append(name)
-                            ignore_lc.add(name.lower())
-                            changed = True
-                if changed:
-                    ConfigManager.set_config_value(ignore, 'performance', 'ignore_processes')
-                    ConfigManager.set_config_value(force, 'performance', 'force_game_processes')
-                    refresh_lists()
-                    if hasattr(self, '_proc_apply_filter') and hasattr(self, '_proc_search_box'):
-                        try:
-                            self._proc_apply_filter(self._proc_search_box.text())
-                        except Exception:
-                            pass
-            except Exception as e:
-                QMessageBox.warning(self, 'Error', f'Could not move selected items.\n{e}')
-
-        btn_refresh_ignore.clicked.connect(refresh_lists)
-        btn_remove_ignore.clicked.connect(lambda: remove_selected('ignore_processes', ignore_list))
-        btn_refresh_force.clicked.connect(refresh_lists)
-        btn_remove_force.clicked.connect(lambda: remove_selected('force_game_processes', force_list))
-        btn_move_toggle.clicked.connect(move_toggle)
-
-        # Assemble columns
-        ignore_controls = QHBoxLayout()
-        ignore_controls.setSpacing(8)
-        ignore_controls.addWidget(btn_refresh_ignore)
-        ignore_controls.addWidget(btn_remove_ignore)
-        ignore_col.addWidget(ignore_label)
-        ignore_col.addWidget(ignore_list)
-        ignore_col.addLayout(ignore_controls)
-
-        force_controls = QHBoxLayout()
-        force_controls.setSpacing(8)
-        force_controls.addWidget(btn_refresh_force)
-        force_controls.addWidget(btn_remove_force)
-        force_col.addWidget(force_label)
-        force_col.addWidget(force_list)
-        force_col.addLayout(force_controls)
-
-        middle_col.addStretch(1)
-        middle_col.addWidget(btn_move_toggle)
-        middle_col.addStretch(1)
-
-        container.addLayout(ignore_col, 1)
-        container.addLayout(middle_col)
-        container.addLayout(force_col, 1)
-        refresh_lists()
-        return container
+        pass
 
     def create_widget_for_type(self, key, meta, category, sub_category):
         """Create a widget based on the meta type."""
@@ -781,85 +652,3 @@ class SettingsWindow(BaseWindow):
             }
         """)
 
-class KeyCaptureDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle('Press desired activation combo')
-        self.setModal(True)
-        self.setFixedSize(420, 160)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-
-        v = QVBoxLayout(self)
-        self.label = QLabel('Press keys (including modifiers). Release to confirm. Esc to cancel.')
-        v.addWidget(self.label)
-        self.combo_view = QLineEdit()
-        self.combo_view.setReadOnly(True)
-        v.addWidget(self.combo_view)
-        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
-        buttons.rejected.connect(self.reject)
-        v.addWidget(buttons)
-
-        self.pressed = set()
-        self.result_combo = ''
-
-    def keyPressEvent(self, event):
-        key = self._key_to_string(event)
-        if key:
-            self.pressed.add(key)
-            self._update_view()
-
-    def keyReleaseEvent(self, event):
-        if event.key() == Qt.Key_Escape:
-            self.reject()
-            return
-        # On last release, accept the combo
-        key = self._key_to_string(event)
-        if key and key in self.pressed:
-            self.pressed.discard(key)
-        if not self.pressed:
-            # Build canonical combo order: CTRL+SHIFT+ALT+META+...+KEY
-            mods = []
-            others = []
-            for k in list(self._last_combo):
-                if k in ('CTRL', 'SHIFT', 'ALT', 'META'):
-                    mods.append(k)
-        else:
-                    others.append(k)
-        combo = '+'.join(mods + others)
-        self.result_combo = combo
-        self.accept()
-
-    def _update_view(self):
-        self._last_combo = sorted(self.pressed)
-        self.combo_view.setText('+'.join(self._last_combo))
-
-    def _key_to_string(self, event) -> str:
-        key = event.key()
-        if key in (Qt.Key_Control, Qt.Key_Meta):
-            return 'CTRL' if key == Qt.Key_Control else 'META'
-        if key in (Qt.Key_Shift,):
-            return 'SHIFT'
-        if key in (Qt.Key_Alt,):
-            return 'ALT'
-        # Convert printable keys and function keys
-        if Qt.Key_F1 <= key <= Qt.Key_F24:
-            return f'F{key - Qt.Key_F1 + 1}'
-        text = event.text().upper()
-        if text:
-            # Normalize special characters
-            mapping = {
-                ' ': 'SPACE', '-': 'MINUS', '=': 'EQUALS', '[': 'LEFT_BRACKET', ']': 'RIGHT_BRACKET',
-                ';': 'SEMICOLON', "'": 'QUOTE', '`': 'BACKQUOTE', '\\': 'BACKSLASH', ',': 'COMMA', '.': 'PERIOD', '/': 'SLASH'
-            }
-            return mapping.get(text, text)
-        # Arrow and other special keys
-        specials = {
-            Qt.Key_Left: 'LEFT', Qt.Key_Right: 'RIGHT', Qt.Key_Up: 'UP', Qt.Key_Down: 'DOWN',
-            Qt.Key_Return: 'ENTER', Qt.Key_Enter: 'ENTER', Qt.Key_Tab: 'TAB', Qt.Key_Backspace: 'BACKSPACE',
-            Qt.Key_Escape: 'ESC', Qt.Key_Insert: 'INSERT', Qt.Key_Delete: 'DELETE', Qt.Key_Home: 'HOME',
-            Qt.Key_End: 'END', Qt.Key_PageUp: 'PAGE_UP', Qt.Key_PageDown: 'PAGE_DOWN',
-        }
-        return specials.get(key, '')
-
-    def combo_string(self) -> str:
-        return self.result_combo

@@ -10,7 +10,7 @@ from collections import deque
 from threading import Event
 
 from transcription import transcribe
-from utils import ConfigManager
+from utils import ConfigManager, Logger
 
 
 class ResultThread(QThread):
@@ -71,6 +71,7 @@ class ResultThread(QThread):
 
             self.statusSignal.emit('recording')
             ConfigManager.console_print('Recording...')
+            Logger.log('Recording started')
             audio_data = self._record_audio()
 
             if not self.is_running:
@@ -82,6 +83,7 @@ class ResultThread(QThread):
 
             self.statusSignal.emit('transcribing')
             ConfigManager.console_print('Transcribing...')
+            Logger.log('Transcribing started')
 
             # Time the transcription process
             start_time = time.time()
@@ -90,6 +92,7 @@ class ResultThread(QThread):
 
             transcription_time = end_time - start_time
             ConfigManager.console_print(f'Transcription completed in {transcription_time:.2f} seconds. Post-processed line: {result}')
+            Logger.log(f'Transcription completed in {transcription_time:.2f}s')
 
             if not self.is_running:
                 return
@@ -99,6 +102,7 @@ class ResultThread(QThread):
 
         except Exception as e:
             traceback.print_exc()
+            Logger.log('Error in ResultThread; see traceback above')
             self.statusSignal.emit('error')
             self.resultSignal.emit('')
         finally:
@@ -136,6 +140,7 @@ class ResultThread(QThread):
         def audio_callback(indata, frames, time, status):
             if status:
                 ConfigManager.console_print(f"Audio callback status: {status}")
+                Logger.log(f"Audio callback status: {status}")
             audio_buffer.extend(indata[:, 0])
             data_ready.set()
 
@@ -164,6 +169,7 @@ class ResultThread(QThread):
                         silent_frame_count = 0
                         if not speech_detected:
                             ConfigManager.console_print("Speech detected.")
+                            Logger.log('Speech detected')
                             speech_detected = True
                     else:
                         silent_frame_count += 1
@@ -175,11 +181,13 @@ class ResultThread(QThread):
         duration = len(audio_data) / self.sample_rate
 
         ConfigManager.console_print(f'Recording finished. Size: {audio_data.size} samples, Duration: {duration:.2f} seconds')
+        Logger.log(f'Recording finished. samples={audio_data.size}, duration={duration:.2f}s')
 
         min_duration_ms = recording_options.get('min_duration') or 100
 
         if (duration * 1000) < min_duration_ms:
             ConfigManager.console_print(f'Discarded due to being too short.')
+            Logger.log('Recording discarded due to being too short')
             return None
 
         return audio_data

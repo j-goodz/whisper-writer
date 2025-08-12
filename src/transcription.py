@@ -3,13 +3,14 @@ import os
 import numpy as np
 import soundfile as sf
 
-from utils import ConfigManager
+from utils import ConfigManager, Logger
 
 def create_local_model():
     """
     Create a local model using the faster-whisper library.
     """
     ConfigManager.console_print('Creating local model...')
+    Logger.log('Creating local model...')
     local_model_options = ConfigManager.get_config_section('model_options')['local']
     compute_type = local_model_options['compute_type']
     model_path = local_model_options.get('model_path')
@@ -17,6 +18,7 @@ def create_local_model():
     if compute_type == 'int8':
         device = 'cpu'
         ConfigManager.console_print('Using int8 quantization, forcing CPU usage.')
+        Logger.log('Using int8 quantization, forcing CPU usage')
     else:
         device = local_model_options['device']
 
@@ -25,6 +27,7 @@ def create_local_model():
         from faster_whisper import WhisperModel
         if model_path:
             ConfigManager.console_print(f'Loading model from: {model_path}')
+            Logger.log(f'Loading local model from: {model_path}')
             model = WhisperModel(model_path,
                                  device=device,
                                  compute_type=compute_type,
@@ -36,6 +39,7 @@ def create_local_model():
     except Exception as e:
         ConfigManager.console_print(f'Error initializing WhisperModel: {e}')
         ConfigManager.console_print('Falling back to CPU.')
+        Logger.log(f'Error initializing WhisperModel: {e}; falling back to CPU')
         from faster_whisper import WhisperModel
         model = WhisperModel(model_path or local_model_options['model'],
                              device='cpu',
@@ -43,6 +47,7 @@ def create_local_model():
                              download_root=None if model_path else None)
 
     ConfigManager.console_print('Local model created.')
+    Logger.log('Local model created')
     return model
 
 def transcribe_local(audio_data, local_model=None):
