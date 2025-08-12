@@ -201,3 +201,52 @@ misc:
     value: true
     type: bool
     description: "Launch WhisperWriter when you sign in to Windows."
+
+# Performance guard (Gaming mode)
+performance:
+  enabled:
+    value: true
+    type: bool
+    description: "Detect fullscreen apps (e.g., games) and reduce resource usage automatically. Windows only."
+  show_notifications:
+    value: true
+    type: bool
+    description: "Show a brief status popup when gaming mode pauses/resumes the app."
+  detection_mode:
+    value: fullscreen
+    type: str
+    description: "How to detect gaming apps."
+    options:
+      - fullscreen
+  poll_interval_ms:
+    value: 1500
+    type: int
+    description: "How often to check for fullscreen apps (milliseconds)."
+  pause_listener_on_game:
+    value: true
+    type: bool
+    description: "Stop listening for the activation key while a fullscreen app is active."
+  suspend_local_model_on_game:
+    value: true
+    type: bool
+    description: "Unload the local model (and free GPU memory) while a fullscreen app is active."
+  warm_up_model_after_game:
+    value: true
+    type: bool
+    description: "Warm up (reload) the model after leaving a fullscreen app, if using a local model."
+  fullscreen_threshold_percent:
+    value: 98
+    type: int
+    description: "Percent of monitor area a window must cover to be treated as fullscreen (handles borderless/tiny borders)."
+  treat_maximized_as_fullscreen:
+    value: false
+    type: bool
+    description: "Also treat maximized windows (work area) as fullscreen. Useful if your taskbar is visible."
+  ignore_processes:
+    value: []
+    type: list
+    description: "List of process names to ignore (e.g., explorer.exe, chrome.exe). Case-insensitive."
+  force_game_processes:
+    value: []
+    type: list
+    description: "List of process names to always treat as a game even if not detected fullscreen. Case-insensitive."

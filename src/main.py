@@ -2,7 +2,7 @@ import os
 import sys
 import time
 from audioplayer import AudioPlayer
-from PyQt5.QtCore import QObject, QProcess
+from PyQt5.QtCore import QObject, QProcess, QTimer
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction, QMessageBox
 
@@ -11,6 +11,7 @@ from result_thread import ResultThread
 from ui.main_window import MainWindow
 from ui.settings_window import SettingsWindow
 from ui.status_window import StatusWindow
+from ui.game_status_window import GameStatusWindow
 from transcription import create_local_model
 from input_simulation import InputSimulator
 from utils import ConfigManager
@@ -67,6 +68,9 @@ class WhisperWriterApp(QObject):
 
         if not ConfigManager.get_config_value('misc', 'hide_status_window'):
             self.status_window = StatusWindow()
+            # Allow one-click ignore of detected app
+            self.game_status_window = GameStatusWindow()
+            self.game_status_window.ignoreAppClicked.connect(self._ignore_detected_app)
 
         self.create_tray_icon()
 
@@ -83,7 +87,6 @@ class WhisperWriterApp(QObject):
         # Optional warm-up of local model
         if not ConfigManager.get_config_value('model_options', 'use_api') and ConfigManager.get_config_value('misc', 'warm_up_model_on_launch'):
             # Load the model in a minimal delayed single-shot to avoid blocking UI
-            from PyQt5.QtCore import QTimer
             QTimer.singleShot(100, self._warm_up_model)
 
         # Apply Windows startup setting on launch as well
@@ -94,12 +97,123 @@ class WhisperWriterApp(QObject):
         except Exception:
             pass
 
+        # Start performance guard (gaming mode) if enabled
+        if os.name == 'nt' and ConfigManager.get_config_value('performance', 'enabled'):
+            interval = ConfigManager.get_config_value('performance', 'poll_interval_ms') or 1500
+            self._perf_timer = QTimer()
+            self._perf_timer.timeout.connect(self._check_fullscreen_and_guard)
+            self._perf_timer.start(int(interval))
+            self._is_game_active = False
+
     def _warm_up_model(self):
         if self.local_model is None:
             try:
                 self.local_model = create_local_model()
             except Exception:
                 pass
+
+    def _check_fullscreen_and_guard(self):
+        try:
+            is_fullscreen, app_name = self._detect_fullscreen_info()
+        except Exception:
+            is_fullscreen, app_name = False, ''
+
+        if is_fullscreen and not self._is_game_active:
+            self._is_game_active = True
+            # Pause listener if configured
+            if ConfigManager.get_config_value('performance', 'pause_listener_on_game') and self.key_listener and self.key_listener.is_running():
+                try:
+                    self.key_listener.stop()
+                except Exception:
+                    pass
+            # Unload local model if configured
+            if ConfigManager.get_config_value('performance', 'suspend_local_model_on_game') and self.local_model is not None:
+                try:
+                    self.local_model = None
+                except Exception:
+                    pass
+            if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window'):
+                try:
+                    self.game_status_window.show_paused(app_name)
+                except Exception:
+                    pass
+        elif not is_fullscreen and self._is_game_active:
+            self._is_game_active = False
+            # Resume listener
+            if ConfigManager.get_config_value('performance', 'pause_listener_on_game'):
+                try:
+                    self.key_listener.start()
+                except Exception:
+                    pass
+            # Warm up model after game if desired
+            if (not ConfigManager.get_config_value('model_options', 'use_api') and
+                ConfigManager.get_config_value('performance', 'warm_up_model_after_game')):
+                QTimer.singleShot(100, self._warm_up_model)
+            if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window'):
+                try:
+                    self.game_status_window.show_resumed()
+                except Exception:
+                    pass
+
+    def _detect_fullscreen_info(self) -> tuple[bool, str]:
+        if os.name != 'nt':
+            return False, ''
+        import ctypes
+        import psutil  # type: ignore
+        user32 = ctypes.windll.user32
+        # Get screen size
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return False, ''
+        rect = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+        # Get process name of foreground window
+        pid = ctypes.wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        proc_name = ''
+        try:
+            proc = psutil.Process(int(pid.value))
+            proc_name = (proc.name() or '').lower()
+        except Exception:
+            proc_name = ''
+        ignore = ConfigManager.get_config_value('performance', 'ignore_processes') or []
+        ignore_lc = [str(x).lower() for x in ignore]
+        force = ConfigManager.get_config_value('performance', 'force_game_processes') or []
+        force_lc = [str(x).lower() for x in force]
+        if proc_name and any(proc_name == x or proc_name.endswith('\\'+x) for x in ignore_lc):
+            return False, proc_name
+        if proc_name and any(proc_name == x or proc_name.endswith('\\'+x) for x in force_lc):
+            return True, proc_name
+        # Consider borderless fullscreen if covering almost the full monitor
+        threshold = float(ConfigManager.get_config_value('performance', 'fullscreen_threshold_percent') or 98) / 100.0
+        covers_full = (width >= int(screen_w * threshold)) and (height >= int(screen_h * threshold))
+        if covers_full:
+            return True, proc_name
+        # Optionally treat maximized windows (work area) as fullscreen
+        if ConfigManager.get_config_value('performance', 'treat_maximized_as_fullscreen'):
+            # Compare to work area (screen minus taskbar)
+            SPI_GETWORKAREA = 0x0030
+            work = ctypes.wintypes.RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(work), 0):
+                work_w = work.right - work.left
+                work_h = work.bottom - work.top
+                if width >= work_w and height >= work_h:
+                    return True, proc_name
+        return False, proc_name
+
+    def _ignore_detected_app(self, app_name: str):
+        if not app_name:
+            return
+        current = ConfigManager.get_config_value('performance', 'ignore_processes') or []
+        names = set([str(x).lower() for x in current])
+        if app_name.lower() not in names:
+            current.append(app_name)
+            ConfigManager.set_config_value(current, 'performance', 'ignore_processes')
+            ConfigManager.save_config()
 
     def create_tray_icon(self):
         """
@@ -281,7 +395,18 @@ class WhisperWriterApp(QObject):
                 except Exception:
                     pass
         else:
+            # Keep status as 'transcribing' until after insertion, then idle
+            if not ConfigManager.get_config_value('misc', 'hide_status_window'):
+                try:
+                    self.status_window.updateStatus('transcribing')
+                except Exception:
+                    pass
             self.input_simulator.typewrite(result)
+            if not ConfigManager.get_config_value('misc', 'hide_status_window'):
+                try:
+                    self.status_window.updateStatus('idle')
+                except Exception:
+                    pass
 
         if ConfigManager.get_config_value('misc', 'noise_on_completion'):
             AudioPlayer(os.path.join('assets', 'beep.wav')).play(block=True)

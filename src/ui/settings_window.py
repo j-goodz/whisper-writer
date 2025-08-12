@@ -68,7 +68,8 @@ class SettingsWindow(BaseWindow):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(container)
-            self.tabs.addTab(scroll, category.replace('_', ' ').capitalize())
+            tab_title = 'Gaming and Performance' if category == 'performance' else category.replace('_', ' ').capitalize()
+            self.tabs.addTab(scroll, tab_title)
 
     def create_settings_widgets(self, layout, category, settings):
         """Create widgets for each setting in a category, grouped per sub-category."""
@@ -90,6 +91,10 @@ class SettingsWindow(BaseWindow):
                 self.add_setting_widget(group_layout, key, meta, category, sub_category)
 
             layout.addWidget(group)
+
+        # Add running process selectors in performance tab
+        if category == 'performance':
+            layout.addLayout(self._build_process_selector())
 
     def create_buttons(self):
         """Create reset and save buttons in a bottom action bar."""
@@ -118,7 +123,8 @@ class SettingsWindow(BaseWindow):
         if not widget:
             return
 
-        help_button = self.create_help_button(meta.get('description', ''))
+        description = meta.get('description', '')
+        help_button = self.create_help_button(description)
         help_button.setObjectName('HelpButton')
 
         row.addWidget(label, 2)
@@ -128,6 +134,83 @@ class SettingsWindow(BaseWindow):
             row.addLayout(widget, 5)
         row.addWidget(help_button, 0)
         layout.addLayout(row)
+        # Hover tooltips on label and widget for quicker discovery
+        if description:
+            label.setToolTip(description)
+            if isinstance(widget, QWidget):
+                widget.setToolTip(description)
+            else:
+                try:
+                    inner = widget.itemAt(0).widget()
+                    if isinstance(inner, QWidget):
+                        inner.setToolTip(description)
+                except Exception:
+                    pass
+
+    def _build_process_selector(self):
+        from PyQt5.QtWidgets import QListWidget, QAbstractItemView
+        wrapper = QHBoxLayout()
+        left = QVBoxLayout()
+        right = QVBoxLayout()
+
+        left.addWidget(QLabel('Running processes'))
+        proc_list = QListWidget()
+        proc_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        left.addWidget(proc_list)
+
+        def refresh_processes():
+            try:
+                import psutil
+                proc_list.clear()
+                seen = set()
+                for p in psutil.process_iter(['name']):
+                    name = (p.info.get('name') or '').strip()
+                    if not name:
+                        continue
+                    nl = name.lower()
+                    if nl in seen:
+                        continue
+                    seen.add(nl)
+                    proc_list.addItem(name)
+            except Exception:
+                QMessageBox.warning(self, 'Processes', 'Unable to enumerate running processes.')
+
+        buttons_row = QHBoxLayout()
+        btn_refresh = QPushButton('Refresh')
+        btn_refresh.clicked.connect(refresh_processes)
+        buttons_row.addWidget(btn_refresh)
+        left.addLayout(buttons_row)
+
+        right.addWidget(QLabel('Quick add to lists'))
+        btn_add_ignore = QPushButton('Add selected to Ignore list')
+        btn_add_force = QPushButton('Add selected to Force-as-game list')
+        right.addWidget(btn_add_ignore)
+        right.addWidget(btn_add_force)
+
+        def add_selected(target_key):
+            selected = [i.text() for i in proc_list.selectedItems()]
+            if not selected:
+                return
+            # Merge with existing config list
+            current = ConfigManager.get_config_value('performance', target_key) or []
+            current_lc = set([str(x).lower() for x in current])
+            for name in selected:
+                nl = name.lower()
+                if nl not in current_lc:
+                    current.append(name)
+                    current_lc.add(nl)
+            # Save back to config object only (persist on Save)
+            ConfigManager.set_config_value(current, 'performance', target_key)
+            QMessageBox.information(self, 'Added', f'Added {len(selected)} process(es) to {target_key.replace("_", " ")}. Changes will be saved on Save.')
+
+        btn_add_ignore.clicked.connect(lambda: add_selected('ignore_processes'))
+        btn_add_force.clicked.connect(lambda: add_selected('force_game_processes'))
+
+        wrapper.addLayout(left, 3)
+        wrapper.addSpacing(12)
+        wrapper.addLayout(right, 2)
+        refresh_processes()
+        return wrapper
 
         # Set object names for the widget, label, and help button
         widget_name = f"{category}_{sub_category}_{key}_input" if sub_category else f"{category}_{key}_input"

@@ -94,8 +94,7 @@ class ResultThread(QThread):
             if not self.is_running:
                 return
 
-            # Return to idle and emit the result
-            self.statusSignal.emit('idle')
+            # Emit the result; UI will be set to idle after paste is complete
             self.resultSignal.emit(result)
 
         except Exception as e:
