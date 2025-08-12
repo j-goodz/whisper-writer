@@ -11,7 +11,6 @@ from result_thread import ResultThread
 from ui.main_window import MainWindow
 from ui.settings_window import SettingsWindow
 from ui.status_window import StatusWindow
-from ui.game_status_window import GameStatusWindow
 from transcription import create_local_model
 from input_simulation import InputSimulator
 from utils import ConfigManager
@@ -62,15 +61,19 @@ class WhisperWriterApp(QObject):
         self.result_thread = None
 
         self.main_window = MainWindow()
-        self.main_window.openSettings.connect(self.ensure_settings_window)
-        self.main_window.openSettings.connect(lambda: self.settings_window.show())
+        self.main_window.openSettings.connect(self.show_settings_window)
         self.main_window.startListening.connect(self.key_listener.start)
 
         if not ConfigManager.get_config_value('misc', 'hide_status_window'):
             self.status_window = StatusWindow()
-            # Allow one-click ignore of detected app
-            self.game_status_window = GameStatusWindow()
-            self.game_status_window.ignoreAppClicked.connect(self._ignore_detected_app)
+            # Allow one-click ignore of detected app (lazy import to avoid startup issues)
+            try:
+                from ui.game_status_window import GameStatusWindow  # type: ignore
+                self.game_status_window = GameStatusWindow()
+                self.game_status_window.ignoreAppClicked.connect(self._ignore_detected_app)
+                self.game_status_window.forceAppClicked.connect(self._force_detected_app)
+            except Exception:
+                self.game_status_window = None
 
         self.create_tray_icon()
 
@@ -132,7 +135,7 @@ class WhisperWriterApp(QObject):
                     self.local_model = None
                 except Exception:
                     pass
-            if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window'):
+            if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window') and getattr(self, 'game_status_window', None):
                 try:
                     self.game_status_window.show_paused(app_name)
                 except Exception:
@@ -149,7 +152,7 @@ class WhisperWriterApp(QObject):
             if (not ConfigManager.get_config_value('model_options', 'use_api') and
                 ConfigManager.get_config_value('performance', 'warm_up_model_after_game')):
                 QTimer.singleShot(100, self._warm_up_model)
-            if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window'):
+            if ConfigManager.get_config_value('performance', 'show_notifications') and not ConfigManager.get_config_value('misc', 'hide_status_window') and getattr(self, 'game_status_window', None):
                 try:
                     self.game_status_window.show_resumed()
                 except Exception:
@@ -159,7 +162,10 @@ class WhisperWriterApp(QObject):
         if os.name != 'nt':
             return False, ''
         import ctypes
-        import psutil  # type: ignore
+        try:
+            import psutil  # type: ignore
+        except Exception:
+            psutil = None
         user32 = ctypes.windll.user32
         # Get screen size
         screen_w = user32.GetSystemMetrics(0)
@@ -175,15 +181,18 @@ class WhisperWriterApp(QObject):
         pid = ctypes.wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         proc_name = ''
-        try:
-            proc = psutil.Process(int(pid.value))
-            proc_name = (proc.name() or '').lower()
-        except Exception:
+        if psutil is not None:
+            try:
+                proc = psutil.Process(int(pid.value))
+                proc_name = (proc.name() or '').lower()
+            except Exception:
+                proc_name = ''
+        else:
             proc_name = ''
-        ignore = ConfigManager.get_config_value('performance', 'ignore_processes') or []
-        ignore_lc = [str(x).lower() for x in ignore]
-        force = ConfigManager.get_config_value('performance', 'force_game_processes') or []
-        force_lc = [str(x).lower() for x in force]
+        ignore = [str(x).lower() for x in (ConfigManager.get_config_value('performance', 'ignore_processes') or [])]
+        force = [str(x).lower() for x in (ConfigManager.get_config_value('performance', 'force_game_processes') or [])]
+        ignore_lc = ignore
+        force_lc = force
         if proc_name and any(proc_name == x or proc_name.endswith('\\'+x) for x in ignore_lc):
             return False, proc_name
         if proc_name and any(proc_name == x or proc_name.endswith('\\'+x) for x in force_lc):
@@ -208,12 +217,32 @@ class WhisperWriterApp(QObject):
     def _ignore_detected_app(self, app_name: str):
         if not app_name:
             return
-        current = ConfigManager.get_config_value('performance', 'ignore_processes') or []
-        names = set([str(x).lower() for x in current])
-        if app_name.lower() not in names:
-            current.append(app_name)
-            ConfigManager.set_config_value(current, 'performance', 'ignore_processes')
-            ConfigManager.save_config()
+        app = app_name.lower().strip()
+        ignore = list(ConfigManager.get_config_value('performance', 'ignore_processes') or [])
+        force = list(ConfigManager.get_config_value('performance', 'force_game_processes') or [])
+        ignore_lc = set([str(x).lower() for x in ignore])
+        if app not in ignore_lc:
+            ignore.append(app)
+        # Ensure exclusivity: remove from force if present
+        force = [x for x in force if str(x).lower() != app]
+        ConfigManager.set_config_value(ignore, 'performance', 'ignore_processes')
+        ConfigManager.set_config_value(force, 'performance', 'force_game_processes')
+        ConfigManager.save_config()
+
+    def _force_detected_app(self, app_name: str):
+        if not app_name:
+            return
+        app = app_name.lower().strip()
+        force = list(ConfigManager.get_config_value('performance', 'force_game_processes') or [])
+        ignore = list(ConfigManager.get_config_value('performance', 'ignore_processes') or [])
+        force_lc = set([str(x).lower() for x in force])
+        if app not in force_lc:
+            force.append(app)
+        # Ensure exclusivity: remove from ignore if present
+        ignore = [x for x in ignore if str(x).lower() != app]
+        ConfigManager.set_config_value(force, 'performance', 'force_game_processes')
+        ConfigManager.set_config_value(ignore, 'performance', 'ignore_processes')
+        ConfigManager.save_config()
 
     def create_tray_icon(self):
         """
@@ -250,8 +279,7 @@ class WhisperWriterApp(QObject):
         tray_menu.addSeparator()
 
         settings_action = QAction('Open Settings', self.app)
-        settings_action.triggered.connect(self.ensure_settings_window)
-        settings_action.triggered.connect(lambda: self.settings_window.show())
+        settings_action.triggered.connect(self.show_settings_window)
         tray_menu.addAction(settings_action)
 
         # Separator before exit
@@ -272,8 +300,7 @@ class WhisperWriterApp(QObject):
         def on_tray_activated(reason):
             # Open Settings on single left-click or double-click
             if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
-                self.ensure_settings_window()
-                self.settings_window.show()
+                self.show_settings_window()
         self.tray_icon.activated.connect(on_tray_activated)
 
     def ensure_settings_window(self):
@@ -284,6 +311,16 @@ class WhisperWriterApp(QObject):
             # Pause/resume listening while capturing activation key
             self.settings_window.listening_pause_request.connect(self._pause_listening_for_capture)
             self.settings_window.listening_resume_request.connect(self._resume_listening_after_capture)
+
+    def show_settings_window(self):
+        self.ensure_settings_window()
+        try:
+            # Restore if minimized or hidden, then bring to front and focus
+            self.settings_window.show()
+            self.settings_window.raise_()
+            self.settings_window.activateWindow()
+        except Exception:
+            pass
 
     def cleanup(self):
         if self.key_listener:

@@ -27,6 +27,10 @@ class SettingsWindow(BaseWindow):
         self.init_settings_ui()
         self._original_values = self._snapshot_current_values()
         self._apply_styling()
+        # Allow resizing (override BaseWindow fixed size)
+        self.setMinimumSize(780, 760)
+        self.setMaximumSize(16777215, 16777215)
+        self.resize(820, 800)
 
     def init_settings_ui(self):
         """Initialize the settings user interface."""
@@ -67,6 +71,8 @@ class SettingsWindow(BaseWindow):
             # Wrap in scroll area
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
+            # Avoid horizontal scrolling; keep content within width
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             scroll.setWidget(container)
             tab_title = 'Gaming and Performance' if category == 'performance' else category.replace('_', ' ').capitalize()
             self.tabs.addTab(scroll, tab_title)
@@ -92,9 +98,11 @@ class SettingsWindow(BaseWindow):
 
             layout.addWidget(group)
 
-        # Add running process selectors in performance tab
+        # Add running process selectors and list previews in performance tab
         if category == 'performance':
             layout.addLayout(self._build_process_selector())
+            layout.addSpacing(8)
+            layout.addLayout(self._build_process_lists_preview())
 
     def create_buttons(self):
         """Create reset and save buttons in a bottom action bar."""
@@ -148,14 +156,21 @@ class SettingsWindow(BaseWindow):
                     pass
 
     def _build_process_selector(self):
-        from PyQt5.QtWidgets import QListWidget, QAbstractItemView
+        from PyQt5.QtWidgets import QListWidget, QAbstractItemView, QLineEdit
         wrapper = QHBoxLayout()
+        wrapper.setSpacing(12)
         left = QVBoxLayout()
+        left.setSpacing(6)
         right = QVBoxLayout()
+        right.setSpacing(6)
 
         left.addWidget(QLabel('Running processes'))
+        search_box = QLineEdit()
+        search_box.setPlaceholderText('Search processes...')
+        left.addWidget(search_box)
         proc_list = QListWidget()
         proc_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        proc_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         left.addWidget(proc_list)
 
         def refresh_processes():
@@ -163,6 +178,7 @@ class SettingsWindow(BaseWindow):
                 import psutil
                 proc_list.clear()
                 seen = set()
+                self._all_running_procs = []
                 for p in psutil.process_iter(['name']):
                     name = (p.info.get('name') or '').strip()
                     if not name:
@@ -171,9 +187,30 @@ class SettingsWindow(BaseWindow):
                     if nl in seen:
                         continue
                     seen.add(nl)
-                    proc_list.addItem(name)
+                    self._all_running_procs.append(name)
+                # Apply current filter
+                apply_filter(search_box.text())
             except Exception:
                 QMessageBox.warning(self, 'Processes', 'Unable to enumerate running processes.')
+
+        def apply_filter(text: str):
+            proc_list.clear()
+            if not hasattr(self, '_all_running_procs'):
+                return
+            needle = (text or '').lower().strip()
+            ignore = ConfigManager.get_config_value('performance', 'ignore_processes') or []
+            force = ConfigManager.get_config_value('performance', 'force_game_processes') or []
+            excluded = set([x.lower() for x in ignore] + [x.lower() for x in force])
+            for name in sorted(self._all_running_procs, key=lambda s: s.lower()):
+                if name.lower() in excluded:
+                    continue
+                if not needle or needle in name.lower():
+                    proc_list.addItem(name)
+
+        search_box.textChanged.connect(apply_filter)
+        # Expose filter and search box so other panels can update the running list dynamically
+        self._proc_apply_filter = apply_filter
+        self._proc_search_box = search_box
 
         buttons_row = QHBoxLayout()
         btn_refresh = QPushButton('Refresh')
@@ -181,27 +218,46 @@ class SettingsWindow(BaseWindow):
         buttons_row.addWidget(btn_refresh)
         left.addLayout(buttons_row)
 
-        right.addWidget(QLabel('Quick add to lists'))
-        btn_add_ignore = QPushButton('Add selected to Ignore list')
-        btn_add_force = QPushButton('Add selected to Force-as-game list')
+        quick_add_label = QLabel('Quick add to lists')
+        right.addWidget(quick_add_label)
+        btn_add_ignore = QPushButton('Add selected to Never enter Gaming Mode')
+        btn_add_ignore.setToolTip('These apps will not enter Gaming Mode (hotkey/model not affected).')
+        btn_add_force = QPushButton('Add selected to Always enter Gaming Mode')
+        btn_add_force.setToolTip('These apps will always be treated as games and enter Gaming Mode.')
         right.addWidget(btn_add_ignore)
         right.addWidget(btn_add_force)
 
         def add_selected(target_key):
-            selected = [i.text() for i in proc_list.selectedItems()]
-            if not selected:
-                return
-            # Merge with existing config list
-            current = ConfigManager.get_config_value('performance', target_key) or []
-            current_lc = set([str(x).lower() for x in current])
-            for name in selected:
-                nl = name.lower()
-                if nl not in current_lc:
-                    current.append(name)
-                    current_lc.add(nl)
-            # Save back to config object only (persist on Save)
-            ConfigManager.set_config_value(current, 'performance', target_key)
-            QMessageBox.information(self, 'Added', f'Added {len(selected)} process(es) to {target_key.replace("_", " ")}. Changes will be saved on Save.')
+            try:
+                selected = [i.text() for i in proc_list.selectedItems()]
+                if not selected:
+                    return
+                # Merge with existing config list
+                current = list(ConfigManager.get_config_value('performance', target_key) or [])
+                current_lc = set([str(x).lower() for x in current])
+                for name in selected:
+                    nl = name.lower()
+                    if nl not in current_lc:
+                        current.append(name)
+                        current_lc.add(nl)
+                # Enforce exclusivity across lists
+                other_key = 'force_game_processes' if target_key == 'ignore_processes' else 'ignore_processes'
+                other = list(ConfigManager.get_config_value('performance', other_key) or [])
+                other = [x for x in other if x.lower() not in [s.lower() for s in selected]]
+                # Save back to config object only (persist on Save)
+                ConfigManager.set_config_value(current, 'performance', target_key)
+                ConfigManager.set_config_value(other, 'performance', other_key)
+                friendly = 'Never enter Gaming Mode' if target_key == 'ignore_processes' else 'Always enter Gaming Mode'
+                QMessageBox.information(self, 'Added', f'Added {len(selected)} process(es) to {friendly}. Changes will be saved on Save.')
+                # Refresh lists and remove from running list view
+                if hasattr(self, '_refresh_perf_lists') and callable(self._refresh_perf_lists):
+                    try:
+                        self._refresh_perf_lists()
+                    except Exception:
+                        pass
+                apply_filter(search_box.text())
+            except Exception as e:
+                QMessageBox.warning(self, 'Error', f'Could not add selected items.\n{e}')
 
         btn_add_ignore.clicked.connect(lambda: add_selected('ignore_processes'))
         btn_add_force.clicked.connect(lambda: add_selected('force_game_processes'))
@@ -212,21 +268,141 @@ class SettingsWindow(BaseWindow):
         refresh_processes()
         return wrapper
 
-        # Set object names for the widget, label, and help button
-        widget_name = f"{category}_{sub_category}_{key}_input" if sub_category else f"{category}_{key}_input"
-        label_name = f"{category}_{sub_category}_{key}_label" if sub_category else f"{category}_{key}_label"
-        help_name = f"{category}_{sub_category}_{key}_help" if sub_category else f"{category}_{key}_help"
-        
-        label.setObjectName(label_name)
-        help_button.setObjectName(help_name)
-        
-        if isinstance(widget, QWidget):
-            widget.setObjectName(widget_name)
-        else:
-            # If it's a layout (for model_path), set the object name on the QLineEdit
-            line_edit = widget.itemAt(0).widget()
-            if isinstance(line_edit, QLineEdit):
-                line_edit.setObjectName(widget_name)
+    def _build_process_lists_preview(self):
+        from PyQt5.QtWidgets import QListWidget, QAbstractItemView
+        container = QHBoxLayout()
+        container.setSpacing(12)
+        # Left (Never enter Gaming Mode)
+        ignore_col = QVBoxLayout()
+        ignore_col.setSpacing(6)
+        # Right (Always enter Gaming Mode)
+        force_col = QVBoxLayout()
+        force_col.setSpacing(6)
+        # Middle controls
+        middle_col = QVBoxLayout()
+        middle_col.setSpacing(12)
+
+        ignore_label = QLabel("Never enter Gaming Mode for these processes (ignore list)")
+        force_label = QLabel("Always enter Gaming Mode for these processes (treat as game)")
+        ignore_label.setWordWrap(True)
+        force_label.setWordWrap(True)
+        ignore_list = QListWidget()
+        force_list = QListWidget()
+        ignore_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        force_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        ignore_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        force_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        def refresh_lists():
+            ignore = [str(x).lower() for x in (ConfigManager.get_config_value('performance', 'ignore_processes') or [])]
+            force = [str(x).lower() for x in (ConfigManager.get_config_value('performance', 'force_game_processes') or [])]
+            ignore_list.clear()
+            force_list.clear()
+            for name in ignore:
+                ignore_list.addItem(name)
+            for name in force:
+                force_list.addItem(name)
+        # Expose refresher for use by other handlers
+        self._refresh_perf_lists = refresh_lists
+
+        # Per-list controls
+        btn_refresh_ignore = QPushButton('Refresh')
+        btn_remove_ignore = QPushButton('Remove selected')
+        btn_refresh_force = QPushButton('Refresh')
+        btn_remove_force = QPushButton('Remove selected')
+        # Middle move button toggles direction based on which list has selection
+        btn_move_toggle = QPushButton('Move selected ↔')
+
+        def remove_selected(target_key, list_widget):
+            try:
+                selected = [i.text() for i in list_widget.selectedItems()]
+                if not selected:
+                    return
+                current = ConfigManager.get_config_value('performance', target_key) or []
+                current_lc = [str(x).lower() for x in current]
+                remaining = [x for x in current if x.lower() not in [s.lower() for s in selected]]
+                if len(remaining) != len(current):
+                    ConfigManager.set_config_value(remaining, 'performance', target_key)
+                    # No dialog spam; lists update visually
+                    refresh_lists()
+                    # Also repopulate the running processes list intelligently
+                    if hasattr(self, '_proc_apply_filter') and hasattr(self, '_proc_search_box'):
+                        try:
+                            self._proc_apply_filter(self._proc_search_box.text())
+                        except Exception:
+                            pass
+            except Exception as e:
+                QMessageBox.warning(self, 'Error', f'Could not remove selected items.\n{e}')
+
+        def move_toggle():
+            try:
+                sel_ignore = [i.text() for i in ignore_list.selectedItems()]
+                sel_force = [i.text() for i in force_list.selectedItems()]
+                ignore = ConfigManager.get_config_value('performance', 'ignore_processes') or []
+                force = ConfigManager.get_config_value('performance', 'force_game_processes') or []
+                ignore_lc = set([x.lower() for x in ignore])
+                force_lc = set([x.lower() for x in force])
+                changed = False
+                if sel_ignore:
+                    # Move from ignore -> force
+                    ignore = [x for x in ignore if x.lower() not in [s.lower() for s in sel_ignore]]
+                    for name in sel_ignore:
+                        if name.lower() not in force_lc:
+                            force.append(name)
+                            force_lc.add(name.lower())
+                            changed = True
+                if sel_force:
+                    # Move from force -> ignore
+                    force = [x for x in force if x.lower() not in [s.lower() for s in sel_force]]
+                    for name in sel_force:
+                        if name.lower() not in ignore_lc:
+                            ignore.append(name)
+                            ignore_lc.add(name.lower())
+                            changed = True
+                if changed:
+                    ConfigManager.set_config_value(ignore, 'performance', 'ignore_processes')
+                    ConfigManager.set_config_value(force, 'performance', 'force_game_processes')
+                    refresh_lists()
+                    if hasattr(self, '_proc_apply_filter') and hasattr(self, '_proc_search_box'):
+                        try:
+                            self._proc_apply_filter(self._proc_search_box.text())
+                        except Exception:
+                            pass
+            except Exception as e:
+                QMessageBox.warning(self, 'Error', f'Could not move selected items.\n{e}')
+
+        btn_refresh_ignore.clicked.connect(refresh_lists)
+        btn_remove_ignore.clicked.connect(lambda: remove_selected('ignore_processes', ignore_list))
+        btn_refresh_force.clicked.connect(refresh_lists)
+        btn_remove_force.clicked.connect(lambda: remove_selected('force_game_processes', force_list))
+        btn_move_toggle.clicked.connect(move_toggle)
+
+        # Assemble columns
+        ignore_controls = QHBoxLayout()
+        ignore_controls.setSpacing(8)
+        ignore_controls.addWidget(btn_refresh_ignore)
+        ignore_controls.addWidget(btn_remove_ignore)
+        ignore_col.addWidget(ignore_label)
+        ignore_col.addWidget(ignore_list)
+        ignore_col.addLayout(ignore_controls)
+
+        force_controls = QHBoxLayout()
+        force_controls.setSpacing(8)
+        force_controls.addWidget(btn_refresh_force)
+        force_controls.addWidget(btn_remove_force)
+        force_col.addWidget(force_label)
+        force_col.addWidget(force_list)
+        force_col.addLayout(force_controls)
+
+        middle_col.addStretch(1)
+        middle_col.addWidget(btn_move_toggle)
+        middle_col.addStretch(1)
+
+        container.addLayout(ignore_col, 1)
+        container.addLayout(middle_col)
+        container.addLayout(force_col, 1)
+        refresh_lists()
+        return container
 
     def create_widget_for_type(self, key, meta, category, sub_category):
         """Create a widget based on the meta type."""
@@ -530,10 +706,10 @@ class SettingsWindow(BaseWindow):
             reply = QMessageBox.question(
                 self,
                 'Close without saving?',
-                'Close settings without saving changes?',
+                    'Close settings without saving changes?',
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
-            )
+        )
             if reply != QMessageBox.Yes:
                 event.ignore()
                 return
@@ -647,11 +823,11 @@ class KeyCaptureDialog(QDialog):
             for k in list(self._last_combo):
                 if k in ('CTRL', 'SHIFT', 'ALT', 'META'):
                     mods.append(k)
-                else:
+        else:
                     others.append(k)
-            combo = '+'.join(mods + others)
-            self.result_combo = combo
-            self.accept()
+        combo = '+'.join(mods + others)
+        self.result_combo = combo
+        self.accept()
 
     def _update_view(self):
         self._last_combo = sorted(self.pressed)

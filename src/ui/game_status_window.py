@@ -10,6 +10,7 @@ from ui.base_window import BaseWindow
 
 class GameStatusWindow(BaseWindow):
     ignoreAppClicked = pyqtSignal(str)
+    forceAppClicked = pyqtSignal(str)
 
     def __init__(self):
         super().__init__('WhisperWriter Notice', 520, 140)
@@ -38,6 +39,11 @@ class GameStatusWindow(BaseWindow):
         self.ignore_button.setVisible(False)
         self.ignore_button.clicked.connect(self._on_ignore_clicked)
         buttons.addWidget(self.ignore_button)
+
+        self.force_button = QPushButton('Treat as game')
+        self.force_button.setVisible(False)
+        self.force_button.clicked.connect(self._on_force_clicked)
+        buttons.addWidget(self.force_button)
         layout.addLayout(buttons)
 
         self.main_layout.addLayout(layout)
@@ -47,7 +53,9 @@ class GameStatusWindow(BaseWindow):
         self.title_label.setText('Paused for fullscreen app')
         detail = f'Detected: {app_name}' if app_name else 'Detected a fullscreen application.'
         self.detail_label.setText(detail)
-        self.ignore_button.setVisible(bool(app_name))
+        visible = bool(app_name)
+        self.ignore_button.setVisible(visible)
+        self.force_button.setVisible(visible)
         self._auto_close()
 
     def show_resumed(self):
@@ -55,11 +63,17 @@ class GameStatusWindow(BaseWindow):
         self.title_label.setText('Resumed after fullscreen app')
         self.detail_label.setText('WhisperWriter is active again.')
         self.ignore_button.setVisible(False)
+        self.force_button.setVisible(False)
         self._auto_close()
 
     def _on_ignore_clicked(self):
         if self._current_app_name:
             self.ignoreAppClicked.emit(self._current_app_name)
+        self.close()
+
+    def _on_force_clicked(self):
+        if self._current_app_name:
+            self.forceAppClicked.emit(self._current_app_name)
         self.close()
 
     def _auto_close(self):
