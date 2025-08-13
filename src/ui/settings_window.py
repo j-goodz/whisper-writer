@@ -249,6 +249,24 @@ class SettingsWindow(BaseWindow):
         help_button = self.create_help_button(description)
         help_button.setObjectName('HelpButton')
 
+        # Assign deterministic object names so save/load can find widgets
+        if sub_category is None:
+            input_name = f"{category}_{key}_input"
+            label_name = f"{category}_{key}_label"
+            help_name = f"{category}_{key}_help"
+        else:
+            input_name = f"{category}_{sub_category}_{key}_input"
+            label_name = f"{category}_{sub_category}_{key}_label"
+            help_name = f"{category}_{sub_category}_{key}_help"
+
+        try:
+            label.setObjectName(label_name)
+            help_button.setObjectName(help_name)
+            if isinstance(widget, QWidget):
+                widget.setObjectName(input_name)
+        except Exception:
+            pass
+
         row.addWidget(label, 2)
         if isinstance(widget, QWidget):
             row.addWidget(widget, 5)

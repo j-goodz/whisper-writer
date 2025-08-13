@@ -418,6 +418,9 @@ class KeyListener:
     def update_activation_keys(self):
         """Update activation keys from the current configuration."""
         self.load_activation_keys()
+        # Reset chord state so the new combo works immediately
+        if self.key_chord:
+            self.key_chord.pressed_keys.clear()
 
 class EvdevBackend(InputBackend):
     """

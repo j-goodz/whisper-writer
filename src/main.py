@@ -343,6 +343,13 @@ class WhisperWriterApp(QObject):
             # Pause/resume listening while capturing activation key
             self.settings_window.listening_pause_request.connect(self._pause_listening_for_capture)
             self.settings_window.listening_resume_request.connect(self._resume_listening_after_capture)
+            # Update listener keys if activation key changed on save
+            def _update_keys_on_save():
+                try:
+                    self.key_listener.update_activation_keys()
+                except Exception:
+                    pass
+            self.settings_window.settings_saved.connect(_update_keys_on_save)
 
     def show_settings_window(self):
         self.ensure_settings_window()
