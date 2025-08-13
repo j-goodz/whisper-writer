@@ -18,6 +18,11 @@ class GameStatusWindow(BaseWindow):
 
     def _init_ui(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # Bigger app title on the card
+        try:
+            self.set_title_font_point_size(16)
+        except Exception:
+            pass
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
 

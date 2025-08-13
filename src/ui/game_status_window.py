@@ -22,6 +22,11 @@ class GameStatusWindow(BaseWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
+        # Bigger app title on the card
+        try:
+            self.set_title_font_point_size(16)
+        except Exception:
+            pass
 
         self.title_label = QLabel('')
         self.title_label.setFont(QFont('Segoe UI', 15, QFont.Bold))
@@ -100,7 +105,7 @@ class GameStatusWindow(BaseWindow):
 
     def show_paused(self, app_name: str):
         self._current_app_name = app_name
-        self.title_label.setText('Paused for fullscreen app')
+        self.title_label.setText('Paused')
         detail = f'Detected: {app_name}' if app_name else 'Detected a fullscreen application.'
         self.detail_label.setText(detail)
         visible = bool(app_name)
@@ -111,7 +116,7 @@ class GameStatusWindow(BaseWindow):
 
     def show_resumed(self):
         self._current_app_name = ''
-        self.title_label.setText('Resumed after fullscreen app')
+        self.title_label.setText('Resumed')
         self.detail_label.setText('WhisperWriter is active again.')
         self.ignore_button.setVisible(False)
         self.force_button.setVisible(False)

@@ -42,10 +42,10 @@ class BaseWindow(QMainWindow):
         title_bar_layout.setContentsMargins(0, 0, 0, 0)
 
         # Add the title label
-        title_label = QLabel('WhisperWriter')
-        title_label.setFont(QFont('Segoe UI', 12, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #404040;")
+        self._title_label = QLabel('WhisperWriter')
+        self._title_label.setFont(QFont('Segoe UI', 12, QFont.Bold))
+        self._title_label.setAlignment(Qt.AlignCenter)
+        self._title_label.setStyleSheet("color: #404040;")
 
         # Create a widget for the close button
         close_button_widget = QWidget()
@@ -70,7 +70,7 @@ class BaseWindow(QMainWindow):
 
         # Add widgets to the title bar layout
         title_bar_layout.addWidget(QWidget(), 1)  # Left spacer
-        title_bar_layout.addWidget(title_label, 3)  # Title (with more width)
+        title_bar_layout.addWidget(self._title_label, 3)  # Title (with more width)
         title_bar_layout.addWidget(close_button_widget, 1)  # Close button
 
         self.main_layout.addWidget(title_bar)
@@ -90,6 +90,21 @@ class BaseWindow(QMainWindow):
         Close the window.
         """
         self.close()
+
+    # Helper APIs for children to adjust title appearance
+    def set_title_text(self, text: str):
+        try:
+            self._title_label.setText(text)
+        except Exception:
+            pass
+
+    def set_title_font_point_size(self, point_size: int):
+        try:
+            font = self._title_label.font()
+            font.setPointSize(point_size)
+            self._title_label.setFont(font)
+        except Exception:
+            pass
 
     def mousePressEvent(self, event):
         """
