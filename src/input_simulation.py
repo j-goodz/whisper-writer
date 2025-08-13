@@ -131,10 +131,13 @@ class InputSimulator:
         except Exception:
             previous = None
         pyperclip.copy(text)
+        # Give the OS a moment to update clipboard before issuing Ctrl+V
+        time.sleep(0.05)
         with self.keyboard.pressed(Key.ctrl):
             self.keyboard.press('v')
             self.keyboard.release('v')
-        time.sleep(0.01)
+        # Allow the target app time to read the clipboard before we restore
+        time.sleep(0.15)
         if previous is not None:
             try:
                 pyperclip.copy(previous)

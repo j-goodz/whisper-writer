@@ -20,11 +20,13 @@ def _setup_logging_for_pythonw() -> None:
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "whisper-writer.log")
         log_file_handle = open(log_path, mode="a", buffering=1, encoding="utf-8")
+        os.environ["WW_LOG_PATH"] = log_path
     except Exception:
         try:
             repo_dir = os.path.dirname(__file__)
             log_path = os.path.join(repo_dir, "whisper-writer.log")
             log_file_handle = open(log_path, mode="a", buffering=1, encoding="utf-8")
+            os.environ["WW_LOG_PATH"] = log_path
         except Exception:
             log_file_handle = None
 
@@ -76,7 +78,27 @@ load_dotenv()
 
 # Run directly to avoid an extra Python process spawn and speed startup
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-import main  # type: ignore
+try:
+    import main  # type: ignore
+except Exception as e:
+    # Ensure the error is recorded and visible to the user under pythonw
+    try:
+        import traceback
+        fallback = os.environ.get('WW_LOG_PATH') or os.path.join(os.path.dirname(__file__), 'whisper-writer.log')
+        with open(fallback, 'a', encoding='utf-8') as f:
+            f.write("\n=== Startup import failure ===\n")
+            f.write(f"{e}\n")
+            f.write(traceback.format_exc())
+            f.write("\n")
+    except Exception:
+        pass
+    try:
+        import ctypes
+        msg = f"WhisperWriter failed to start. See log:\n{os.environ.get('WW_LOG_PATH', 'whisper-writer.log')}\n\n{e}"
+        ctypes.windll.user32.MessageBoxW(None, msg, "WhisperWriter", 0x10)
+    except Exception:
+        pass
+    sys.exit(1)
 
 if __name__ == '__main__':
     app = main.WhisperWriterApp()
