@@ -184,16 +184,32 @@ class WhisperWriterApp(QObject):
         except Exception:
             psutil = None
         user32 = ctypes.windll.user32
-        # Get screen size
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
         hwnd = user32.GetForegroundWindow()
         if not hwnd:
             return False, ''
         rect = ctypes.wintypes.RECT()
-        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-        width = rect.right - rect.left
-        height = rect.bottom - rect.top
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        win_w = rect.right - rect.left
+        win_h = rect.bottom - rect.top
+
+        # Use the monitor that contains the window
+        MONITOR_DEFAULTTONEAREST = 2
+        hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("rcMonitor", ctypes.wintypes.RECT),
+                ("rcWork", ctypes.wintypes.RECT),
+                ("dwFlags", ctypes.c_ulong),
+            ]
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(mi))
+
+        mon_w = mi.rcMonitor.right - mi.rcMonitor.left
+        mon_h = mi.rcMonitor.bottom - mi.rcMonitor.top
+        work_w = mi.rcWork.right - mi.rcWork.left
+        work_h = mi.rcWork.bottom - mi.rcWork.top
         # Get process name of foreground window
         pid = ctypes.wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
@@ -214,21 +230,20 @@ class WhisperWriterApp(QObject):
             return False, proc_name
         if proc_name and any(proc_name == x or proc_name.endswith('\\'+x) for x in force_lc):
             return True, proc_name
-        # Consider borderless fullscreen if covering almost the full monitor
+        # Treat maximized-to-work-area as not fullscreen unless explicitly allowed
+        is_maximized_to_work_area = (win_w >= work_w and win_h >= work_h)
+        if is_maximized_to_work_area and not ConfigManager.get_config_value('performance', 'treat_maximized_as_fullscreen'):
+            return False, proc_name
+
+        # Consider true fullscreen if covering almost the full physical monitor (borderless fullscreen)
         threshold = float(ConfigManager.get_config_value('performance', 'fullscreen_threshold_percent') or 98) / 100.0
-        covers_full = (width >= int(screen_w * threshold)) and (height >= int(screen_h * threshold))
-        if covers_full:
+        covers_full_monitor = (win_w >= int(mon_w * threshold)) and (win_h >= int(mon_h * threshold))
+        if covers_full_monitor:
             return True, proc_name
-        # Optionally treat maximized windows (work area) as fullscreen
-        if ConfigManager.get_config_value('performance', 'treat_maximized_as_fullscreen'):
-            # Compare to work area (screen minus taskbar)
-            SPI_GETWORKAREA = 0x0030
-            work = ctypes.wintypes.RECT()
-            if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(work), 0):
-                work_w = work.right - work.left
-                work_h = work.bottom - work.top
-                if width >= work_w and height >= work_h:
-                    return True, proc_name
+
+        # If user opted in, treat maximized windows as fullscreen
+        if is_maximized_to_work_area and ConfigManager.get_config_value('performance', 'treat_maximized_as_fullscreen'):
+            return True, proc_name
         return False, proc_name
 
     def _ignore_detected_app(self, app_name: str):

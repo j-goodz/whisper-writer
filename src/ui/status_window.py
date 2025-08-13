@@ -94,7 +94,7 @@ class StatusWindow(BaseWindow):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         
         status_layout = QHBoxLayout()
-        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setContentsMargins(8, 8, 8, 8)
 
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(32, 32)
@@ -106,7 +106,9 @@ class StatusWindow(BaseWindow):
         self.icon_label.setAlignment(Qt.AlignCenter)
 
         self.status_label = QLabel('Recording...')
-        self.status_label.setFont(QFont('Segoe UI', 12))
+        self.status_label.setFont(QFont('Segoe UI', 14))
+        self.status_label.setWordWrap(True)
+        self.status_label.setAlignment(Qt.AlignCenter)
 
         status_layout.addStretch(1)
         status_layout.addWidget(self.icon_label)
@@ -126,16 +128,27 @@ class StatusWindow(BaseWindow):
         window_width = self.width()
         window_height = self.height()
 
-        x = (screen_width - window_width) // 2
-        y = screen_height - window_height - 120
-
-        self.move(x, y)
+        # Register as a toast and position via BaseWindow stacking logic (higher priority)
+        try:
+            self.register_toast(priority=10)
+        except Exception:
+            pass
         super().show()
+        # Ensure reposition after show in case of fullscreen geometry quirks
+        try:
+            from ui.base_window import BaseWindow
+            QTimer.singleShot(0, BaseWindow._reposition_toasts)
+        except Exception:
+            pass
         
     def closeEvent(self, event):
         """
         Emit the close signal when the window is closed.
         """
+        try:
+            self.unregister_toast()
+        except Exception:
+            pass
         self.closeSignal.emit()
         super().closeEvent(event)
 

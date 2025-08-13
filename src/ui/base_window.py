@@ -1,9 +1,14 @@
-from PyQt5.QtCore import Qt, QRectF
-from PyQt5.QtGui import QPainter, QBrush, QColor, QFont, QPainterPath, QGuiApplication
+from PyQt5.QtCore import Qt, QRectF, QTimer
+from PyQt5.QtGui import QPainter, QBrush, QColor, QFont, QPainterPath, QGuiApplication, QPen
 from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QMainWindow
 
 
 class BaseWindow(QMainWindow):
+    # Simple bottom-center toast stacking across popup windows
+    _toast_entries = []  # list of tuples: (window, priority)
+    _toast_spacing = 10
+    _toast_margin = 20
+
     def __init__(self, title, width, height):
         """
         Initialize the base window.
@@ -20,10 +25,15 @@ class BaseWindow(QMainWindow):
         self.setWindowTitle(title)
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(width, height)
+        # Prefer dynamic sizing: start with a reasonable minimum, allow growth
+        self.setMinimumWidth(width)
+        self.setMinimumHeight(height)
 
         self.main_widget = QWidget(self)
         self.main_layout = QVBoxLayout(self.main_widget)
+        # Let layouts compute the minimum necessary size to avoid clipping
+        from PyQt5.QtWidgets import QLayout
+        self.main_layout.setSizeConstraint(QLayout.SetMinimumSize)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
 
         # Create a widget for the title bar
@@ -112,6 +122,47 @@ class BaseWindow(QMainWindow):
         path.addRoundedRect(QRectF(self.rect()), 20, 20)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 220)))
-        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255, 235)))
+        # Subtle border
+        painter.setPen(QPen(QColor(0, 0, 0, 90), 1.5))
         painter.drawPath(path)
+
+    # Toast stacking helpers
+    @classmethod
+    def _reposition_toasts(cls):
+        if not cls._toast_entries:
+            return
+        # Sort by priority (low at bottom, high on top). Stable to keep insertion order within same priority
+        ordered = sorted(cls._toast_entries, key=lambda t: t[1])
+        screen = QGuiApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        # Anchor: bottom-center with margin
+        current_bottom = geo.bottom() - BaseWindow._toast_margin
+        for window, _priority in ordered:
+            if not window.isVisible():
+                continue
+            ww = window.width()
+            wh = window.height()
+            x = int(geo.center().x() - ww / 2)
+            y = int(current_bottom - wh)
+            window.move(x, y)
+            current_bottom = y - BaseWindow._toast_spacing
+
+        # Ensure higher priority windows are raised on top in z-order
+        for window, _ in ordered:
+            window.raise_()
+
+    def register_toast(self, priority: int = 0):
+        # Avoid duplicates
+        existing = [w for (w, _p) in BaseWindow._toast_entries]
+        if self not in existing:
+            BaseWindow._toast_entries.append((self, priority))
+        BaseWindow._reposition_toasts()
+        # Re-run after the event loop paints the window to ensure final size/position
+        QTimer.singleShot(0, BaseWindow._reposition_toasts)
+
+    def unregister_toast(self):
+        BaseWindow._toast_entries = [(w, p) for (w, p) in BaseWindow._toast_entries if w is not self]
+        BaseWindow._reposition_toasts()
