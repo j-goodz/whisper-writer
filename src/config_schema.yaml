@@ -146,6 +146,18 @@ post_processing:
     value: 0.005
     type: float
     description: "The delay in seconds between each key press when writing the transcribed text."
+  paste_verify_timeout_ms:
+    value: 500
+    type: int
+    description: "Max time to wait for clipboard verification before falling back to typing."
+  paste_restore_delay_ms:
+    value: 800
+    type: int
+    description: "Delay after paste before restoring previous clipboard. Increase if target app reads clipboard late."
+  paste_restore_clipboard:
+    value: true
+    type: bool
+    description: "Restore the user's previous clipboard after pasting. Disable for maximum reliability."
   bulk_paste_threshold:
     value: 80
     type: int

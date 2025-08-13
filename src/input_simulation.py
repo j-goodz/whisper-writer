@@ -3,6 +3,12 @@ import os
 import signal
 import time
 from pynput.keyboard import Controller as PynputController, Key
+try:
+    import win32clipboard  # type: ignore
+    import win32con  # type: ignore
+except Exception:
+    win32clipboard = None
+    win32con = None
 
 from utils import ConfigManager, Logger
 
@@ -98,7 +104,10 @@ class InputSimulator:
         mode = (ConfigManager.get_config_value('post_processing', 'writing_mode') or 'auto').lower()
         if self.input_method == 'pynput':
             if self.should_use_paste(text):
-                self._paste_pynput(text)
+                if not self._safe_clipboard_paste(text):
+                    # Fallback: accelerate typing if paste failed verification
+                    fast_interval = max(0.0, min((ConfigManager.get_config_value('post_processing', 'writing_key_press_delay') or 0.0) / 4.0, 0.002))
+                    self._typewrite_pynput(text, fast_interval)
             else:
                 self._typewrite_pynput(text, max(0.0, interval or 0.0))
         elif self.input_method == 'ydotool':
@@ -119,30 +128,90 @@ class InputSimulator:
             self.keyboard.release(char)
             time.sleep(interval)
 
-    def _paste_pynput(self, text):
+    def _safe_clipboard_paste(self, text: str) -> bool:
+        """Attempt a robust clipboard paste with verification and controlled restore.
+
+        Returns True if pasted via clipboard; False if caller should fallback to typing.
+        """
+        verify_timeout_ms = ConfigManager.get_config_value('post_processing', 'paste_verify_timeout_ms') or 500
+        restore_delay_ms = ConfigManager.get_config_value('post_processing', 'paste_restore_delay_ms') or 800
+        restore_enabled = ConfigManager.get_config_value('post_processing', 'paste_restore_clipboard') is not False
+
+        # Save current clipboard using best available mechanism
+        previous_text = None
         try:
             import pyperclip
+            previous_text = pyperclip.paste()
         except Exception:
-            # Fallback to typing if clipboard lib not available
-            return self._typewrite_pynput(text, 0.0)
-        # Save current clipboard, set text, paste, restore
-        try:
-            previous = pyperclip.paste()
-        except Exception:
-            previous = None
-        pyperclip.copy(text)
-        # Give the OS a moment to update clipboard before issuing Ctrl+V
-        time.sleep(0.05)
+            previous_text = None
+
+        def _set_clipboard_win(txt: str) -> bool:
+            if win32clipboard and win32con:
+                for _ in range(5):
+                    try:
+                        win32clipboard.OpenClipboard()
+                        win32clipboard.EmptyClipboard()
+                        win32clipboard.SetClipboardText(txt, win32con.CF_UNICODETEXT)
+                        win32clipboard.CloseClipboard()
+                        return True
+                    except Exception:
+                        try:
+                            win32clipboard.CloseClipboard()
+                        except Exception:
+                            pass
+                        time.sleep(0.02)
+                return False
+            else:
+                try:
+                    import pyperclip
+                    pyperclip.copy(txt)
+                    return True
+                except Exception:
+                    return False
+
+        if not _set_clipboard_win(text):
+            return False
+
+        # Verify clipboard content matches what we intend to paste
+        def _get_clipboard_text() -> str:
+            if win32clipboard and win32con:
+                try:
+                    win32clipboard.OpenClipboard()
+                    data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                    win32clipboard.CloseClipboard()
+                    return data or ''
+                except Exception:
+                    try:
+                        win32clipboard.CloseClipboard()
+                    except Exception:
+                        pass
+                    return ''
+            try:
+                import pyperclip
+                return pyperclip.paste() or ''
+            except Exception:
+                return ''
+
+        deadline = time.time() + (verify_timeout_ms / 1000.0)
+        while time.time() < deadline:
+            if _get_clipboard_text() == text:
+                break
+            time.sleep(0.02)
+        else:
+            return False
+
+        # Paste
         with self.keyboard.pressed(Key.ctrl):
             self.keyboard.press('v')
             self.keyboard.release('v')
-        # Allow the target app time to read the clipboard before we restore
-        time.sleep(0.15)
-        if previous is not None:
-            try:
-                pyperclip.copy(previous)
-            except Exception:
-                pass
+
+        # Optionally restore clipboard after a delay, only if unchanged
+        if restore_enabled:
+            time.sleep(max(0.0, restore_delay_ms / 1000.0))
+            current = _get_clipboard_text()
+            if previous_text is not None and current == text:
+                _set_clipboard_win(previous_text)
+        return True
 
     def _typewrite_ydotool(self, text, interval):
         """
