@@ -127,17 +127,19 @@ class ResultThread(QThread):
         # Create VAD only for recording modes that use it
         recording_mode = recording_options.get('recording_mode') or 'continuous'
         vad = None
-        if recording_mode in ('voice_activity_detection', 'continuous'):
+        if recording_mode in ('voice_activity_detection', 'continuous', 'hybrid'):
             vad = webrtcvad.Vad(2)  # VAD aggressiveness: 0 to 3, 3 being the most aggressive
             speech_detected = False
             silent_frame_count = 0
+            ConfigManager.console_print(f"VAD enabled for {recording_mode} mode. Silence threshold: {silence_frames} frames ({silence_duration_ms}ms)")
+            Logger.log(f'VAD enabled for {recording_mode} mode. Silence threshold: {silence_frames} frames ({silence_duration_ms}ms)')
 
         audio_buffer = deque(maxlen=frame_size)
         recording = []
 
         data_ready = Event()
 
-        def audio_callback(indata, frames, time, status):
+        def audio_callback(indata, frames, time_info, status):
             if status:
                 ConfigManager.console_print(f"Audio callback status: {status}")
                 Logger.log(f"Audio callback status: {status}")
@@ -165,7 +167,8 @@ class ResultThread(QThread):
                     continue
 
                 if vad:
-                    if vad.is_speech(frame.tobytes(), self.sample_rate):
+                    is_speech = vad.is_speech(frame.tobytes(), self.sample_rate)
+                    if is_speech:
                         silent_frame_count = 0
                         if not speech_detected:
                             ConfigManager.console_print("Speech detected.")
@@ -173,8 +176,12 @@ class ResultThread(QThread):
                             speech_detected = True
                     else:
                         silent_frame_count += 1
+                        if speech_detected and silent_frame_count % 10 == 0:  # Log every 10th silent frame
+                            ConfigManager.console_print(f"Silent frame count: {silent_frame_count}/{silence_frames}")
 
                     if speech_detected and silent_frame_count > silence_frames:
+                        ConfigManager.console_print(f"Silence detected for {silent_frame_count} frames, stopping recording")
+                        Logger.log(f'Silence detected for {silent_frame_count} frames, stopping recording')
                         break
 
         audio_data = np.array(recording, dtype=np.int16)

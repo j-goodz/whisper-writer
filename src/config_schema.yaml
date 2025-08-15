@@ -101,12 +101,13 @@ recording_options:
   recording_mode:
     value: continuous
     type: str
-    description: "The recording mode to use. Options include continuous (auto-restart recording after pause in speech until activation key is pressed again), voice_activity_detection (stop recording after pause in speech), press_to_toggle (stop recording when activation key is pressed again), hold_to_record (stop recording when activation key is released)."
+    description: "The recording mode to use. Options include continuous (auto-restart recording after pause in speech until activation key is pressed again), voice_activity_detection (stop recording after pause in speech), press_to_toggle (stop recording when activation key is pressed again), hold_to_record (stop recording when activation key is released), hybrid (combines VAD with manual toggle - stops on silence OR when hotkey is pressed again)."
     options:
       - continuous
       - voice_activity_detection
       - press_to_toggle
       - hold_to_record
+      - hybrid
   sound_device:
     value: null
     type: str

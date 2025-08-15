@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Activation key “Set” dialog that captures key combos (no manual typing needed).
 - Paste-only/auto typing modes (`post_processing.writing_mode`) and bulk paste threshold.
 - Numeric inputs (SpinBoxes) for int/float settings for easier editing.
+- Hybrid recording mode (`recording_options.recording_mode: hybrid`) that combines voice activity detection with manual toggle - stops recording on silence OR when hotkey is pressed again.
+- Improved recording status window with cleaner layout and better instructions.
 
 ### Changed
 - Faster startup via lazy imports and deferring local model creation until first use.

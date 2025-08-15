@@ -276,14 +276,15 @@ class SettingsWindow(BaseWindow):
         layout.addLayout(row)
         # Hover tooltips on label and widget for quicker discovery
         if description:
-            label.setToolTip(description)
+            formatted_description = self._format_tooltip_text(description)
+            label.setToolTip(formatted_description)
             if isinstance(widget, QWidget):
-                widget.setToolTip(description)
+                widget.setToolTip(formatted_description)
             else:
                 try:
                     inner = widget.itemAt(0).widget()
                     if isinstance(inner, QWidget):
-                        inner.setToolTip(description)
+                        inner.setToolTip(formatted_description)
                 except Exception:
                     pass
 
@@ -445,11 +446,47 @@ class SettingsWindow(BaseWindow):
         help_button = QToolButton()
         help_button.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxQuestion))
         help_button.setAutoRaise(True)
-        help_button.setToolTip(description)
+        
+        # Add line breaks to long descriptions for better readability
+        formatted_description = self._format_tooltip_text(description)
+        help_button.setToolTip(formatted_description)
+        
         help_button.setCursor(Qt.PointingHandCursor)
         help_button.setFocusPolicy(Qt.NoFocus)
         help_button.clicked.connect(lambda: self.show_description(description))
         return help_button
+
+    def _format_tooltip_text(self, text):
+        """Format tooltip text with line breaks for better readability."""
+        if len(text) < 80:
+            return text
+        
+        # Split on common punctuation and add line breaks
+        words = text.split()
+        lines = []
+        current_line = []
+        current_length = 0
+        
+        for word in words:
+            # Check if adding this word would make the line too long
+            if current_length + len(word) + 1 > 60:  # 60 chars per line
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                    current_length = len(word)
+                else:
+                    # Single long word, just add it
+                    lines.append(word)
+                    current_line = []
+                    current_length = 0
+            else:
+                current_line.append(word)
+                current_length += len(word) + 1
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        return '\n'.join(lines)
 
     def get_config_value(self, category, sub_category, key, meta):
         if sub_category:

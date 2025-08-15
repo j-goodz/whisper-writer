@@ -401,13 +401,15 @@ class WhisperWriterApp(QObject):
         Logger.log('Activation key pressed')
         if self.result_thread and self.result_thread.isRunning():
             recording_mode = ConfigManager.get_config_value('recording_options', 'recording_mode')
-            if recording_mode == 'press_to_toggle':
+            if recording_mode in ('press_to_toggle', 'hybrid'):
                 self.result_thread.stop_recording()
             elif recording_mode == 'continuous':
                 self.stop_result_thread()
             return
 
         self.start_result_thread()
+
+
 
     def on_deactivation(self):
         """

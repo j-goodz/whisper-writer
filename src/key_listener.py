@@ -392,10 +392,14 @@ class KeyListener:
 
     def on_input_event(self, event):
         """Handle input events and trigger callbacks if the key chord becomes active or inactive."""
-        if not self.key_chord or not self.active_backend:
+        if not self.active_backend:
             return
 
         key, event_type = event
+
+        # Handle activation key chord
+        if not self.key_chord:
+            return
 
         was_active = self.key_chord.is_active()
         is_active = self.key_chord.update(key, event_type)
