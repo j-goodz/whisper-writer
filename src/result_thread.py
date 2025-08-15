@@ -91,8 +91,11 @@ class ResultThread(QThread):
             end_time = time.time()
 
             transcription_time = end_time - start_time
-            ConfigManager.console_print(f'Transcription completed in {transcription_time:.2f} seconds. Post-processed line: {result}')
-            Logger.log(f'Transcription completed in {transcription_time:.2f}s')
+            # Hash the result for privacy while still allowing identification
+            import hashlib
+            result_hash = hashlib.md5(result.encode('utf-8')).hexdigest()[:8] if result else 'empty'
+            ConfigManager.console_print(f'Transcription completed in {transcription_time:.2f} seconds. Content hash: {result_hash} (length: {len(result)})')
+            Logger.log(f'Transcription completed in {transcription_time:.2f}s, content hash: {result_hash}')
 
             if not self.is_running:
                 return
@@ -179,7 +182,14 @@ class ResultThread(QThread):
                         if speech_detected and silent_frame_count % 10 == 0:  # Log every 10th silent frame
                             ConfigManager.console_print(f"Silent frame count: {silent_frame_count}/{silence_frames}")
 
-                    if speech_detected and silent_frame_count > silence_frames:
+                    # For hybrid mode, stop on silence even if no speech was detected initially
+                    # For other VAD modes, require speech to be detected first
+                    should_stop_on_silence = (
+                        (recording_mode == 'hybrid' and silent_frame_count > silence_frames) or
+                        (recording_mode != 'hybrid' and speech_detected and silent_frame_count > silence_frames)
+                    )
+                    
+                    if should_stop_on_silence:
                         ConfigManager.console_print(f"Silence detected for {silent_frame_count} frames, stopping recording")
                         Logger.log(f'Silence detected for {silent_frame_count} frames, stopping recording')
                         break

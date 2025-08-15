@@ -402,6 +402,7 @@ class WhisperWriterApp(QObject):
         if self.result_thread and self.result_thread.isRunning():
             recording_mode = ConfigManager.get_config_value('recording_options', 'recording_mode')
             if recording_mode in ('press_to_toggle', 'hybrid'):
+                # For toggle modes, stop recording but keep status window open until transcription completes
                 self.result_thread.stop_recording()
             elif recording_mode == 'continuous':
                 self.stop_result_thread()
@@ -489,6 +490,7 @@ class WhisperWriterApp(QObject):
                     pass
             Logger.log('Inserting transcription into active window')
             self.input_simulator.typewrite(result)
+            # Close status window for all modes after text insertion
             if not ConfigManager.get_config_value('misc', 'hide_status_window'):
                 try:
                     self.status_window.updateStatus('idle')

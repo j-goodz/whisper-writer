@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Numeric inputs (SpinBoxes) for int/float settings for easier editing.
 - Hybrid recording mode (`recording_options.recording_mode: hybrid`) that combines voice activity detection with manual toggle - stops recording on silence OR when hotkey is pressed again.
 - Improved recording status window with cleaner layout and better instructions.
+- Enhanced clipboard paste reliability with retry logic and improved timeout handling for slow UI scenarios.
+- New configuration option `paste_retry_attempts` to control clipboard operation retries.
 
 ### Changed
 - Faster startup via lazy imports and deferring local model creation until first use.
@@ -24,6 +26,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Closing main window now hides the app instead of exiting; app remains in the tray.
 - Tray menu grouped with separators; removed “Show Main Menu”.
 - Defaults updated: `misc.warm_up_model_on_launch` = true, `misc.start_on_login` = true.
+- Increased default clipboard verification timeout from 500ms to 2000ms to better handle slow UI scenarios.
+- Increased default clipboard restore delay from 800ms to 1000ms for better compatibility.
+- Fixed 'V' character issue that could appear after clipboard paste operations.
+- Improved clipboard paste operation with better key handling and timing.
+- Enhanced logging for clipboard operations to aid in debugging paste issues.
+- Improved privacy: Transcription content is now hashed in logs instead of being logged in plain text.
+- Fixed hybrid mode issues: Status window now closes after text insertion, and silence detection works properly even without initial speech.
 
 ### Removed
 - Deprecated tray item “Show Main Menu”.

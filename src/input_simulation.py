@@ -136,6 +136,12 @@ class InputSimulator:
         verify_timeout_ms = ConfigManager.get_config_value('post_processing', 'paste_verify_timeout_ms') or 500
         restore_delay_ms = ConfigManager.get_config_value('post_processing', 'paste_restore_delay_ms') or 800
         restore_enabled = ConfigManager.get_config_value('post_processing', 'paste_restore_clipboard') is not False
+        retry_attempts = ConfigManager.get_config_value('post_processing', 'paste_retry_attempts') or 2
+
+        # Increase timeout for slow UI scenarios
+        verify_timeout_ms = max(verify_timeout_ms, 2000)  # Minimum 2 seconds for slow systems
+        
+        Logger.log(f'Attempting clipboard paste with {verify_timeout_ms}ms timeout and {retry_attempts} retry attempts')
 
         # Save current clipboard using best available mechanism
         previous_text = None
@@ -169,9 +175,6 @@ class InputSimulator:
                 except Exception:
                     return False
 
-        if not _set_clipboard_win(text):
-            return False
-
         # Verify clipboard content matches what we intend to paste
         def _get_clipboard_text() -> str:
             if win32clipboard and win32con:
@@ -192,26 +195,59 @@ class InputSimulator:
             except Exception:
                 return ''
 
-        deadline = time.time() + (verify_timeout_ms / 1000.0)
-        while time.time() < deadline:
-            if _get_clipboard_text() == text:
-                break
-            time.sleep(0.02)
-        else:
-            return False
+        # Retry loop for clipboard operations
+        for attempt in range(retry_attempts + 1):
+            if attempt > 0:
+                Logger.log(f'Retrying clipboard paste (attempt {attempt + 1}/{retry_attempts + 1})')
+                time.sleep(0.1)  # Brief delay between retries
 
-        # Paste
-        with self.keyboard.pressed(Key.ctrl):
-            self.keyboard.press('v')
-            self.keyboard.release('v')
+            # Set clipboard content
+            if not _set_clipboard_win(text):
+                Logger.log(f'Failed to set clipboard content on attempt {attempt + 1}')
+                continue
 
-        # Optionally restore clipboard after a delay, only if unchanged
-        if restore_enabled:
-            time.sleep(max(0.0, restore_delay_ms / 1000.0))
-            current = _get_clipboard_text()
-            if previous_text is not None and current == text:
-                _set_clipboard_win(previous_text)
-        return True
+            # Wait for clipboard verification
+            deadline = time.time() + (verify_timeout_ms / 1000.0)
+            verification_success = False
+            while time.time() < deadline:
+                if _get_clipboard_text() == text:
+                    verification_success = True
+                    break
+                time.sleep(0.02)
+            
+            if not verification_success:
+                Logger.log(f'Clipboard verification failed after {verify_timeout_ms}ms timeout on attempt {attempt + 1}')
+                continue
+
+            Logger.log(f'Clipboard verification successful on attempt {attempt + 1}, performing paste')
+
+            # Perform paste with improved key handling to prevent 'V' character issue
+            try:
+                # Use a more reliable paste method that avoids the 'V' character issue
+                with self.keyboard.pressed(Key.ctrl):
+                    # Add a small delay to ensure Ctrl is fully pressed
+                    time.sleep(0.01)
+                    # Press and release 'v' in a single operation
+                    self.keyboard.tap('v')
+                    # Add a small delay to ensure the paste completes
+                    time.sleep(0.01)
+            except Exception as e:
+                Logger.log(f'Error during paste operation on attempt {attempt + 1}: {e}')
+                continue
+
+            # Optionally restore clipboard after a delay, only if unchanged
+            if restore_enabled:
+                time.sleep(max(0.0, restore_delay_ms / 1000.0))
+                current = _get_clipboard_text()
+                if previous_text is not None and current == text:
+                    _set_clipboard_win(previous_text)
+                    Logger.log('Previous clipboard content restored')
+            
+            Logger.log(f'Clipboard paste completed successfully on attempt {attempt + 1}')
+            return True
+
+        Logger.log(f'All {retry_attempts + 1} clipboard paste attempts failed')
+        return False
 
     def _typewrite_ydotool(self, text, interval):
         """
